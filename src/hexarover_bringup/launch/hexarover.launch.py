@@ -7,25 +7,30 @@ from launch_ros.actions import Node
 import xacro
 
 def generate_launch_description():
-    # Nazwa pakietu z opisem robota
+    # Nazwy pakietów
     desc_pkg_name = 'hexarover_description'
+    gazebo_pkg_name = 'hexarover_gazebo'
 
-    # 1. Znajdź i przetwórz plik URDF
+    # 1. Konfiguracja modelu (URDF)
     pkg_path = get_package_share_directory(desc_pkg_name)
     xacro_file = os.path.join(pkg_path, 'urdf', 'hexarover.urdf.xacro')
     doc = xacro.parse(open(xacro_file))
     xacro.process_doc(doc)
     params = {'robot_description': doc.toxml()}
 
-    # 2. Uruchom Gazebo Sim (pusty świat)
+    # 2. Konfiguracja Świata (ZMIANA TUTAJ)
+    world_pkg_path = get_package_share_directory(gazebo_pkg_name)
+    world_file = os.path.join(world_pkg_path, 'worlds', 'obstacles.sdf')
+
+    # Uruchomienie Gazebo z naszym światem (-r oznacza 'run' - autostart)
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
         ),
-        launch_arguments={'gz_args': '-r empty.sdf'}.items(),
+        launch_arguments={'gz_args': f'-r {world_file}'}.items(),
     )
 
-    # 3. Zespawnuj robota (Wstaw model do świata)
+    # 3. Spawn robota
     spawn_entity = Node(
         package='ros_gz_sim',
         executable='create',
@@ -33,7 +38,7 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 4. Robot State Publisher (Publikuje relacje między częściami robota)
+    # 4. Robot State Publisher
     node_robot_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -41,11 +46,14 @@ def generate_launch_description():
         parameters=[params]
     )
 
-    # 5. Most ROS <-> Gazebo (Dla sterowania)
+    # 5. Most ROS <-> Gazebo
     bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
-        arguments=['/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist'],
+        arguments=[
+            '/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
+            '/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan'
+        ],
         output='screen'
     )
 

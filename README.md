@@ -25,6 +25,7 @@ source install/setup.bash
 ros2 launch hexarover_bringup hexarover.launch.py
 ```
 ### 5. Testowe sterowanie 
+(w nowym oknie terminala)
 ```
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.5}, angular: {z: 0.2}}"
 ```

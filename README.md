@@ -29,3 +29,22 @@ ros2 launch hexarover_bringup hexarover.launch.py
 ```
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.5}, angular: {z: 0.2}}"
 ```
+## 📊 Wizualizacja (RViz2)
+
+Projekt posiada skonfigurowane środowisko RViz2, które uruchamia się automatycznie razem z symulacją.
+
+* **Lokalizacja konfiguracji:** `src/hexarover_bringup/rviz/rviz.rviz`
+
+### Jak korzystać?
+Po uruchomieniu komendy startowej (`ros2 launch...`) otworzy się okno RViz.
+
+* **Czerwone kropki/linie** – odczyty z lasera (ściany i przeszkody).
+* **Model robota** – aktualna pozycja i stan kół.
+
+### 🛠 Rozwiązywanie problemów z RViz
+Jeśli po pobraniu zmian (`git pull`) RViz zgłasza błąd o braku pliku konfiguracyjnego, **musisz przebudować projekt**, aby nowy plik został zainstalowany:
+
+```bash
+colcon build --symlink-install
+source install/setup.bash
+```

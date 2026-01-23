@@ -11,7 +11,7 @@ find_package(ros_gz_sim REQUIRED)
 find_package(ros_gz_bridge REQUIRED)
 
 install(
-  DIRECTORY launch
+  DIRECTORY launch rviz
   DESTINATION share/${PROJECT_NAME}
 )
 

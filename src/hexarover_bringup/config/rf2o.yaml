@@ -1,0 +1,11 @@
+rf2o_laser_odometry:
+  ros__parameters:
+    use_sim_time: true
+    laser_scan_topic: "/scan"      # JAWNA NAZWA TEMATU
+    odom_topic: "/odom"           # Standardowa nazwa
+    publish_tf: true
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
+    laser_frame_id: "lidar_link"
+    init_pose_from_topic: ""      # KLUCZ: nie czekaj na dodatkowe tematy
+    freq: 10.0                    # Zmniejszamy częstotliwość dla stabilności symulacji

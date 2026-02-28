@@ -10,6 +10,9 @@
   <material name="red">
     <color rgba="1 0 0 1"/>
   </material>
+  <material name="green">
+  <color rgba="0 1 0 1"/>
+</material>
 
   <link name="base_link">
     <visual>
@@ -94,6 +97,30 @@
   </joint>
 
 
+  <link name="imu_link">
+    <visual>
+      <geometry>
+         <cylinder radius="0.035" length="0.04"/>
+       </geometry>
+      <material name="green"/>
+    </visual>
+        <collision>
+      <geometry>
+        <cylinder radius="0.035" length="0.02"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.01"/> 
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+  </link>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0.2 0 0.10" rpy="0 0 0"/> 
+    </joint>
+
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
       <left_joint>mid_left_wheel_joint</left_joint>
@@ -102,6 +129,13 @@
       <wheel_radius>0.065</wheel_radius>
       <topic>cmd_vel</topic>
       <max_linear_acceleration>2.0</max_linear_acceleration>
+
+      <odom_publish_frequency>0</odom_publish_frequency>
+      <publish_odom>false</publish_odom>
+      <publish_odom_tf>false</publish_odom_tf>
+  
+      <child_frame_id>base_link</child_frame_id>
+      <odom_topic>odometry_off</odom_topic> 
     </plugin>
 
     <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
@@ -110,6 +144,9 @@
 
     <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
       <topic>joint_states</topic> <update_rate>30</update_rate>
+    </plugin>
+
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu">
     </plugin>
   </gazebo>
 
@@ -135,6 +172,59 @@
       <topic>scan</topic>
       <gz_frame_id>lidar_link</gz_frame_id>
     </sensor>
+  </gazebo>
+
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <pose>0 0 0 0 0 0</pose>
+      <always_on>true</always_on>
+      <visualize>true</visualize>
+      <update_rate>10</update_rate>  
+      <imu>
+        <angular_velocity>
+          <x>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.0</stddev>
+            </noise>
+          </x>
+          <y>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.0</stddev>
+            </noise>
+          </y>
+          <z>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.0</stddev>
+            </noise>
+          </z>
+        </angular_velocity>
+        <linear_acceleration>
+          <x>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.0</stddev>
+            </noise>
+          </x>
+          <y>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.0</stddev>
+            </noise>
+          </y>
+          <z>
+            <noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>0.0</stddev>
+            </noise>
+          </z>
+        </linear_acceleration>
+      </imu>
+      <topic>/imu</topic>
+      <gz_frame_id>imu_link</gz_frame_id>
+      </sensor>
   </gazebo>
 
 </robot>

@@ -9,9 +9,13 @@ find_package(ament_cmake REQUIRED)
 find_package(hexarover_description REQUIRED)
 find_package(ros_gz_sim REQUIRED)
 find_package(ros_gz_bridge REQUIRED)
-
+install(FILES
+      config/slam_toolbox.yaml
+      config/rf2o.yaml
+  DESTINATION share/${PROJECT_NAME}/config
+)
 install(
-  DIRECTORY launch rviz
+  DIRECTORY launch rviz 
   DESTINATION share/${PROJECT_NAME}
 )
 

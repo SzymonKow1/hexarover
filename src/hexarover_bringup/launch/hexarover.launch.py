@@ -60,9 +60,11 @@ def generate_launch_description():
         package='ros_gz_bridge',
         executable='parameter_bridge',
         arguments=[
+            '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock', #zegar
             '/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
             '/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
-            '/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model', # <--- NOWOŚĆ: Stan kół
+            '/imu@sensor_msgs/msg/Imu@gz.msgs.IMU', #dane z imu
+            '/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model', # Stan kół
         ],
         output='screen',
         parameters=[{'use_sim_time': True}]
@@ -80,12 +82,36 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('rviz')),
         parameters=[{'use_sim_time': True}] # RViz też musi znać czas symulacji
     )
+    # 7. rf2o (Odometria z lasera)
+    rf2o_config = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'rf2o.yaml')
+    
+    rf2o_node = Node(
+        package='rf2o_laser_odometry',
+        executable='rf2o_laser_odometry_node',
+        name='rf2o_laser_odometry',
+        output='screen',
+        parameters=[rf2o_config, {'use_sim_time': True}] # Wymuszamy czas symulacji
+    )
 
+    # 8. SLAM (Automatyczny start)
+    slam_config_path = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'slam_toolbox.yaml')
+    
+    slam_toolbox_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(get_package_share_directory('slam_toolbox'), 'launch', 'online_async_launch.py')
+        ),
+        launch_arguments={
+            'slam_params_file': slam_config_path,
+            'use_sim_time': 'true'
+        }.items()
+    )
     return LaunchDescription([
         rviz_arg,
         gazebo,
         node_robot_state_publisher,
         spawn_entity,
         bridge,
-        rviz_node
+        rviz_node,
+        rf2o_node,        
+        slam_toolbox_launch 
     ])

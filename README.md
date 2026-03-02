@@ -13,18 +13,22 @@ cd ~/ros2_ws/src
 ```
 git clone [https://github.com/SzymonKow1/hexarover.git](https://github.com/SzymonKow1/hexarover.git)
 ```
-### 3. Instalacja i Budowanie
+### 3. Zainstaluj niezbędne pakiety ROS 2 Jazzy
+```
+sudo apt install ros-jazzy-slam-toolbox ros-jazzy-rf2o-laser-odometry
+```
+### 4. Instalacja i Budowanie
 ```
 cd ~/ros2_ws
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
 ```
-### 4. Uruchomienie Symulacji 
+### 5. Uruchomienie Symulacji 
 ```
 source install/setup.bash
 ros2 launch hexarover_bringup hexarover.launch.py
 ```
-### 5. Testowe sterowanie 
+### 6. Testowe sterowanie 
 (w nowym oknie terminala)
 ```
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.5}, angular: {z: 0.2}}"

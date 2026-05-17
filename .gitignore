@@ -4,3 +4,14 @@ log/
 .colcon_ignore
 *.pyc
 __pycache__/
+
+*.mp4
+*.avi
+*.jpg
+*.png
+
+*.pt
+*.onnx
+
+.vscode/
+.idea/

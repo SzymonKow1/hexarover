@@ -17,6 +17,14 @@ zawsze kiedy dodajesz nowy pakiet dopisz go w linijce ponizej w readme!!!
 ```
 sudo apt install ros-jazzy-slam-toolbox 
 ```
+#### 3.1 Aby uruchomić model yolo należy zainstalować ultralytics oraz opencv globalnie na komputerze  (lub systemie docelowym) a nie za pośrednictwem venva
+```
+pip3 install --user ultralytics opencv-python --break-system-packages
+```
+nalezy też wymusić wersje numpy 
+```
+pip3 install --user "numpy<2" --break-system-packages
+```
 ### 4. Instalacja i Budowanie
 ```
 cd ~/ros2_ws

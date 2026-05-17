@@ -12,7 +12,7 @@
   </material>
   <material name="green">
   <color rgba="0 1 0 1"/>
-</material>
+  </material>
 
   <link name="base_link">
     <visual>

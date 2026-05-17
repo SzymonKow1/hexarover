@@ -64,7 +64,8 @@ def generate_launch_description():
             '/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
             '/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
             '/imu@sensor_msgs/msg/Imu@gz.msgs.IMU', #dane z imu
-            '/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model', # Stan kół
+            #'/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model', # Stan kół
+            '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model',
         ],
         output='screen',
         parameters=[{'use_sim_time': True}]
@@ -93,7 +94,7 @@ def generate_launch_description():
         parameters=[rf2o_config, {'use_sim_time': True}] # Wymuszamy czas symulacji
     )
 
-    # 8. SLAM (Automatyczny start)
+     # 8. SLAM
     slam_config_path = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'slam_toolbox.yaml')
     
     slam_toolbox_launch = IncludeLaunchDescription(
@@ -105,6 +106,23 @@ def generate_launch_description():
             'use_sim_time': 'true'
         }.items()
     )
+    # 9. nav2
+    pkg_bringup_path = get_package_share_directory(bringup_pkg_name) # Pobieramy pełną ścieżkę
+    nav2_params_path = os.path.join(pkg_bringup_path, 'config', 'nav2.yaml')
+    nav2_launch_dir = os.path.join(get_package_share_directory('nav2_bringup'), 'launch')
+
+    nav2_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(nav2_launch_dir, 'bringup_launch.py')),
+        launch_arguments={
+            'use_sim_time': 'true',
+            'params_file': nav2_params_path,
+            'use_collision_monitor': 'true',  # WYŁĄCZ TO
+            'use_nav2_docking': 'true',
+            'use_lifecycle_mgr': 'true'
+    }.items()
+    )
+
+     
     return LaunchDescription([
         rviz_arg,
         gazebo,
@@ -113,5 +131,6 @@ def generate_launch_description():
         bridge,
         rviz_node,
         rf2o_node,        
-        slam_toolbox_launch 
+        slam_toolbox_launch,
+        nav2_launch 
     ])

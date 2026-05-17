@@ -3,19 +3,19 @@
 Wykonaj poniższe kroki w terminalu, aby pobrać projekt i uruchomić symulację.
 
 ### 1. Pobranie repozytorium
-Upewnij się, że masz utworzony workspace (katalog roboczy). Wejdź do folderu `src`:
-
-```bash
-mkdir -p ~/ros2_ws/src
-cd ~/ros2_ws/src
+Upewnij sie że znajdujesz sie w katalogu domowym
 ```
-### 2. Sklonuj repozytorium
+cd 
 ```
-git clone [https://github.com/SzymonKow1/hexarover.git](https://github.com/SzymonKow1/hexarover.git)
+### 2. Sklonuj repozytorium ze zmieniną nazwą 
+(dlaczego? - BO TAK!) (--recursive musi byc)
 ```
-### 3. Zainstaluj niezbędne pakiety ROS 2 Jazzy
+git clone --recursive https://github.com/SzymonKow1/hexarover.git ros2_ws
 ```
-sudo apt install ros-jazzy-slam-toolbox ros-jazzy-rf2o-laser-odometry
+### 3. Zainstaluj niezbędne pakiety ROS 2 Jazzy 
+zawsze kiedy dodajesz nowy pakiet dopisz go w linijce ponizej w readme!!!
+```
+sudo apt install ros-jazzy-slam-toolbox 
 ```
 ### 4. Instalacja i Budowanie
 ```
@@ -44,6 +44,13 @@ Po uruchomieniu komendy startowej (`ros2 launch...`) otworzy się okno RViz.
 
 * **Czerwone kropki/linie** – odczyty z lasera (ściany i przeszkody).
 * **Model robota** – aktualna pozycja i stan kół.
+
+### SLAM
+zaznacz w lewym menu następujące rzeczy:
+* global options -> fixed frame -> map
+* Map -> topic -> Reliability Policy -> best effort
+
+w przypadku gdy dokonasz zmian które wymagaja innych lub dodatkowych ustawin rosa popraw/uzupełnij readme
 
 ### 🛠 Rozwiązywanie problemów z RViz
 Jeśli po pobraniu zmian (`git pull`) RViz zgłasza błąd o braku pliku konfiguracyjnego, **musisz przebudować projekt**, aby nowy plik został zainstalowany:

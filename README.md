@@ -31,10 +31,27 @@ cd ~/ros2_ws
 rosdep install --from-paths src --ignore-src -r -y
 colcon build --symlink-install
 ```
+#### System wizyjny dziala oddzoelnie od reszty systemu aby go uruchomić należy
+```
+cd ~/ros2_ws
+colcon build --packages-select hexarover_vision
+```
+
 ### 5. Uruchomienie Symulacji 
 ```
 source install/setup.bash
 ros2 launch hexarover_bringup hexarover.launch.py
+```
+#### System wizyjny:
+w jednym oknie terminala:
+```
+source ~/ros2_ws/install/setup.bash
+ros2 run hexarover_vision video_publisher
+```
+w drugim oknie:
+```
+source ~/ros2_ws/install/setup.bash
+ros2 run hexarover_vision vision_node
 ```
 ### 6. Testowe sterowanie 
 (w nowym oknie terminala)

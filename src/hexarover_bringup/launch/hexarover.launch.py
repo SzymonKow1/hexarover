@@ -65,6 +65,7 @@ def generate_launch_description():
             '/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
             '/imu@sensor_msgs/msg/Imu@gz.msgs.IMU', #dane z imu
             '/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model', # Stan kół
+            '/image_raw@sensor_msgs/msg/Image[gz.msgs.Image' # <--- KAMERA
         ],
         output='screen',
         parameters=[{'use_sim_time': True}]
@@ -105,6 +106,15 @@ def generate_launch_description():
             'use_sim_time': 'true'
         }.items()
     )
+    
+    # 9. RQT IMAGE VIEW (Podgląd oka robota)
+    rqt_image_view_node = Node(
+        package='rqt_image_view',
+        executable='rqt_image_view',
+        arguments=['/image_raw'],
+        output='screen'
+    )
+    
     return LaunchDescription([
         rviz_arg,
         gazebo,
@@ -113,5 +123,6 @@ def generate_launch_description():
         bridge,
         rviz_node,
         rf2o_node,        
-        slam_toolbox_launch 
+        slam_toolbox_launch,
+        rqt_image_view_node
     ])

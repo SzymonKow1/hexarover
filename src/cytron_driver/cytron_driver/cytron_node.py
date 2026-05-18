@@ -4,6 +4,8 @@ from geometry_msgs.msg import Twist
 import serial
 
 MAX_SPEED = 63
+MAX_SPEED = int(MAX_SPEED*7.5/11.1)
+print(f'Max speed set to {MAX_SPEED} based on 7.5V supply')
 PORT = '/dev/ttyUSB0'
 BAUD = 9600
 

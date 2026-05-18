@@ -102,3 +102,114 @@ Po weryfikacji fizycznej:
 - Jazda do przodu: lewy CCW + prawy CW
 - Jazda do tyłu: lewy CW + prawy CCW
 
+
+
+
+# Instalacja ROS2 Jazzy (Ubuntu 24.04)
+
+Aktualizacja systemu:
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
+Instalacja narzędzi:
+```bash
+sudo apt install software-properties-common curl -y
+```
+
+Dodanie klucza GPG ROS2:
+```bash
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+```
+
+Dodanie repozytorium ROS2:
+```bash
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+```
+
+Odświeżenie listy pakietów i instalacja ROS2:
+```bash
+sudo apt update
+sudo apt install ros-jazzy-desktop -y
+```
+
+Aktywacja ROS2 (jednorazowo w sesji):
+```bash
+source /opt/ros/jazzy/setup.bash
+```
+
+Dodanie do bashrc żeby działało automatycznie przy każdym otwarciu terminala:
+```bash
+echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+
+
+# Sterownik Cytrona w ROS2
+
+### Struktura paczki
+
+Paczka `cytron_driver` znajduje się w `src/cytron_driver/`.
+Główny plik to `src/cytron_driver/cytron_driver/cytron_node.py`.
+
+Węzeł subskrybuje temat `/cmd_vel` (standardowy temat ROS2 do sterowania robotem)
+i tłumaczy komendy prędkości na bajty wysyłane przez UART do Cytrona.
+
+### Pierwsze uruchomienie
+
+Zbuduj workspace:
+```bash
+cd ~/ros2_ws
+colcon build
+```
+
+Zasourcuj ROS2 i workspace (jeśli nie masz w ~/.bashrc):
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+```
+
+Uruchom węzeł:
+```bash
+ros2 run cytron_driver cytron_node
+```
+
+Powinno pojawić się: [INFO] [cytron_driver]: Cytron driver uruchomiony
+
+### Sterowanie
+
+W drugim terminalu wysyłaj komendy na temat `/cmd_vel`.
+Wartości `linear.x` i `angular.z` są w zakresie -1.0 do 1.0.
+
+Jazda do przodu:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.3}, angular: {z: 0.0}}" --once
+```
+
+Jazda do tyłu:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: -0.3}, angular: {z: 0.0}}" --once
+```
+
+Skręt w lewo:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, angular: {z: 0.3}}" --once
+```
+
+Skręt w prawo:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, angular: {z: -0.3}}" --once
+```
+
+Stop:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, angular: {z: 0.0}}" --once
+```
+
+### Uwagi
+
+- Cytron musi być zasilony z akumulatora przed uruchomieniem węzła
+- Port szeregowy to `/dev/ttyUSB0`, baud rate 9600
+- Użytkownik musi być w grupie `dialout`
+- Silniki Dagu wytrzymują max 7.5V — nie przekraczać wartości linear.x powyżej 0.5 dopóki robot nie jest przetestowany pod obciążeniem

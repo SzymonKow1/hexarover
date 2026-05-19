@@ -11,8 +11,8 @@
     <color rgba="1 0 0 1"/>
   </material>
   <material name="green">
-  <color rgba="0 1 0 1"/>
-</material>
+    <color rgba="0 1 0 1"/>
+  </material>
 
   <link name="base_link">
     <visual>
@@ -119,9 +119,9 @@
     <parent link="base_link"/>
     <child link="imu_link"/>
     <origin xyz="0.2 0 0.10" rpy="0 0 0"/> 
-    </joint>
+  </joint>
 
-    <link name="camera_link">
+  <link name="camera_link">
     <visual>
       <geometry>
         <box size="0.02 0.05 0.03"/>
@@ -149,9 +149,68 @@
   <joint name="camera_optical_joint" type="fixed">
     <parent link="camera_link"/>
     <child link="camera_link_optical"/>
-    <!-- Standardowa konwersja osi optycznych OpenCV -->
     <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
   </joint>
+
+  <!-- ======================== MAKRO DLA CZUJNIKÓW ULTRADŹWIĘKOWYCH ======================== -->
+  <xacro:macro name="sonar" params="name x y z yaw">
+    <link name="sonar_${name}_link">
+      <visual>
+        <geometry><box size="0.01 0.03 0.015"/></geometry>
+        <material name="black"/>
+      </visual>
+    </link>
+
+    <joint name="sonar_${name}_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="sonar_${name}_link"/>
+      <!-- Montaż używając zmiennych zdefiniowanych przy wywołaniu makra -->
+      <origin xyz="${x} ${y} ${z}" rpy="0 0 ${yaw}"/>
+    </joint>
+
+    <gazebo reference="sonar_${name}_link">
+      <sensor name="sonar_${name}_sensor" type="gpu_lidar">
+        <always_on>true</always_on>
+        <update_rate>10</update_rate>
+        <visualize>true</visualize>
+        <topic>/sonar_${name}</topic>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>10</samples>
+              <resolution>1</resolution>
+              <!-- Kąt widzenia sonaru: ok. 30 stopni (od -15 do +15) -->
+              <min_angle>-0.26</min_angle>
+              <max_angle>0.26</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>5</samples>
+              <resolution>1</resolution>
+              <min_angle>-0.1</min_angle>
+              <max_angle>0.1</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <!-- Zasięg od 2cm do 4 metrów -->
+            <min>0.02</min>
+            <max>4.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </ray>
+        <gz_frame_id>sonar_${name}_link</gz_frame_id>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ======================== MONTAŻ 4 CZUJNIKÓW NA ROGACH ROBOTA ======================== -->
+  <!-- Przód: Leciutko skierowane na boki (kąty 0.4 rad = ~23 stopnie) -->
+  <xacro:sonar name="front_left"  x="0.22" y="0.08"  z="0.05" yaw="0.4"/>  
+  <xacro:sonar name="front_right" x="0.22" y="-0.08" z="0.05" yaw="-0.4"/> 
+  
+  <!-- Tył: Skierowane mocniej na boki, by pokryć ślepe strefy (kąty 2.35 rad = ~135 stopni) -->
+  <xacro:sonar name="rear_left"   x="-0.22" y="0.08"  z="0.05" yaw="2.35"/> 
+  <xacro:sonar name="rear_right"  x="-0.22" y="-0.08" z="0.05" yaw="-2.35"/>
+
 
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
@@ -171,7 +230,7 @@
     </plugin>
 
     <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
-      <render_engine>ogre2</render_engine>
+      <!-- render_engine puste zgodnie z Twoimi poprzednimi udanymi testami -->
     </plugin>
 
     <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
@@ -215,48 +274,30 @@
       <imu>
         <angular_velocity>
           <x>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </x>
           <y>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </y>
           <z>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </z>
         </angular_velocity>
         <linear_acceleration>
           <x>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </x>
           <y>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </y>
           <z>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </z>
         </linear_acceleration>
       </imu>
       <topic>/imu</topic>
       <gz_frame_id>imu_link</gz_frame_id>
-      </sensor>
+    </sensor>
   </gazebo>
 
   <gazebo reference="camera_link">

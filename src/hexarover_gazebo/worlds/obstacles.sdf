@@ -145,5 +145,41 @@
       <pose>1.0 0.0 0.0 0 0 -1.57</pose>
     </include>
 
+    <!-- ==================== SZKLANA ŚCIANA (TEST SONARÓW) ==================== -->
+    <model name="glass_wall">
+      <static>true</static>
+      <!-- Pozycja: X=-1.5, Y=0, Z=0.5 (Środek wysokości) -->
+      <pose>-1.5 0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.05 2.0 1.0</size> <!-- Grubość: 5cm, Szerokość: 2m, Wysokość: 1m -->
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+        <visibility_flags>2</visibility_flags>
+          <geometry>
+            <box>
+              <size>0.05 2.0 1.0</size>
+            </box>
+          </geometry>
+          <material>
+            <!-- Kolor RGBA (Ostatnia wartość to przezroczystość 'Alpha') -->
+            <ambient>0.6 0.8 1.0 0.2</ambient>
+            <diffuse>0.6 0.8 1.0 0.2</diffuse>
+            <specular>1.0 1.0 1.0 0.8</specular>
+            <pbr>
+              <metal>
+                <roughness>0.01</roughness> <!-- Gładkie jak szkło -->
+                <metalness>0.1</metalness>
+              </metal>
+            </pbr>
+          </material>
+        </visual>
+      </link>
+    </model>
+
   </world>
 </sdf>

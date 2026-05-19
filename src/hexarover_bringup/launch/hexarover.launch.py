@@ -65,7 +65,11 @@ def generate_launch_description():
             '/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
             '/imu@sensor_msgs/msg/Imu@gz.msgs.IMU', #dane z imu
             '/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model', # Stan kół
-            '/image_raw@sensor_msgs/msg/Image[gz.msgs.Image' # <--- KAMERA
+            '/image_raw@sensor_msgs/msg/Image[gz.msgs.Image', # <--- KAMERA
+            '/sonar_front_left@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            '/sonar_front_right@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            '/sonar_rear_left@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            '/sonar_rear_right@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'
         ],
         output='screen',
         parameters=[{'use_sim_time': True}]

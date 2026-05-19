@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'cytron_node = cytron_driver.cytron_node:main',
+            'imu_node = cytron_driver.imu_node:main',
         ],
     },
 )

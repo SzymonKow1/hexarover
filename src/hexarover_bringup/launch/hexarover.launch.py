@@ -7,6 +7,7 @@ from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
 import xacro
+from launch.actions import TimerAction
 
 def generate_launch_description():
     desc_pkg_name = 'hexarover_description'
@@ -127,11 +128,15 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(os.path.join(nav2_launch_dir, 'bringup_launch.py')),
         launch_arguments={
             'use_sim_time': 'true',
-            'params_file': nav2_params_path
-            #'map': ''         # PUSTA MAPA - to wyłączy map_server
+            'params_file': nav2_params_path,
+            'map': '',         # PUSTA MAPA - to wyłączy map_server
+            'autostart': 'true'
     }.items()
     )
-
+    delayed_nav2 = TimerAction(
+        period=5.0, # Czekamy 5 sekund
+        actions=[nav2_launch]
+    )
      
     return LaunchDescription([
         rviz_arg,
@@ -143,5 +148,5 @@ def generate_launch_description():
         #rf2o_node,        
         scan_matcher_node,
         slam_toolbox_launch,
-        nav2_launch 
+        delayed_nav2
     ])

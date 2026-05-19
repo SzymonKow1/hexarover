@@ -84,16 +84,28 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}] # RViz też musi znać czas symulacji
     )
     # 7. rf2o (Odometria z lasera)
-    rf2o_config = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'rf2o.yaml')
+    # rf2o_config = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'rf2o.yaml')
     
-    rf2o_node = Node(
-        package='rf2o_laser_odometry',
-        executable='rf2o_laser_odometry_node',
-        name='rf2o_laser_odometry',
+    # rf2o_node = Node(
+    #     package='rf2o_laser_odometry',
+    #     executable='rf2o_laser_odometry_node',
+    #     name='rf2o_laser_odometry',
+    #     output='screen',
+    #     parameters=[rf2o_config, {'use_sim_time': True}] # Wymuszamy czas symulacji
+    # )
+    # 7. Laser Scan Matcher (Odometria z lasera - Zastępuje rf2o)
+    scan_matcher_config = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'scan_matcher.yaml')
+    
+    scan_matcher_node = Node(
+        package='ros2_laser_scan_matcher',
+        executable='laser_scan_matcher',
+        name='laser_scan_matcher',
         output='screen',
-        parameters=[rf2o_config, {'use_sim_time': True}] # Wymuszamy czas symulacji
+        parameters=[scan_matcher_config, {'use_sim_time': True}],
+        remappings=[
+            ('/scan', '/scan') # Upewniamy się, że słucha dobrego tematu
+        ]
     )
-
      # 8. SLAM
     slam_config_path = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'slam_toolbox.yaml')
     
@@ -115,10 +127,8 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(os.path.join(nav2_launch_dir, 'bringup_launch.py')),
         launch_arguments={
             'use_sim_time': 'true',
-            'params_file': nav2_params_path,
-            'use_collision_monitor': 'true',  # WYŁĄCZ TO
-            'use_nav2_docking': 'true',
-            'use_lifecycle_mgr': 'true'
+            'params_file': nav2_params_path
+            #'map': ''         # PUSTA MAPA - to wyłączy map_server
     }.items()
     )
 
@@ -126,11 +136,12 @@ def generate_launch_description():
     return LaunchDescription([
         rviz_arg,
         gazebo,
+        bridge,
         node_robot_state_publisher,
         spawn_entity,
-        bridge,
         rviz_node,
-        rf2o_node,        
+        #rf2o_node,        
+        scan_matcher_node,
         slam_toolbox_launch,
         nav2_launch 
     ])

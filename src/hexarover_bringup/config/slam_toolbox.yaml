@@ -17,7 +17,7 @@ slam_toolbox:
     max_laser_range: 10.0
     minimum_time_interval: 0.1
     transform_timeout: 0.2
-    tf_buffer_duration: 30.
+    tf_buffer_duration: 60.0
     stack_size_to_use: 40000000 
 
     # Ustawienia publikacji (Zwolnione, by nie przeciążać Gazebo)

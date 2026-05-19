@@ -11,7 +11,8 @@ find_package(ros_gz_sim REQUIRED)
 find_package(ros_gz_bridge REQUIRED)
 install(FILES
       config/slam_toolbox.yaml
-      config/rf2o.yaml
+      #config/rf2o.yaml
+      config/scan_matcher.yaml
       config/nav2.yaml
   DESTINATION share/${PROJECT_NAME}/config
 )

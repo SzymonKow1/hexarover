@@ -2,7 +2,7 @@
 
 Wykonaj poniższe kroki w terminalu, aby pobrać projekt i uruchomić symulację.
 
-### 1. Sklaunuj repozytorium
+### 1. Sklonuj repozytorium
 upewnij sie ze znajdujesz sie w katalogu domowym:
 ```bash
 cd

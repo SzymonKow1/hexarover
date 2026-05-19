@@ -1,9 +1,7 @@
 import cv2
 from ultralytics import YOLO
 
-CAMERA_FOV_DEG = 60.0 # adjust this value based on your camera's specifications
-VIDEO_PATH = "test_videos/tata.mp4"
-
+CAMERA_FOV_DEG = 60.0 # dostosuj tę wartość do specyfikacji swojej kamery
 
 def calculate_angle(x_center, image_width, fov):
     center_of_camera = image_width / 2.0
@@ -11,22 +9,22 @@ def calculate_angle(x_center, image_width, fov):
     angle_per_pixel = fov / image_width
     return pixel_difference * angle_per_pixel
 
-
 def main():
     print("Loading YOLOv8 model...")
     model = YOLO("yolov8n.pt")
 
-    cap = cv2.VideoCapture(VIDEO_PATH)
+    # ZMIANA: Zamiast VIDEO_PATH, podajemy 0, aby użyć domyślnej kamery
+    cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
-        print(f"ERROR: path {VIDEO_PATH} does not exist or cannot be opened.")
+        print("BŁĄD: Nie można otworzyć kamery. Upewnij się, że jest podłączona i nie jest używana przez inny program.")
         return
 
     while True:
         ret, frame = cap.read()
 
         if not ret:
-            print("End of video")
+            print("Nie można pobrać klatki z kamery.")
             break
 
         frame = cv2.resize(frame, (800, 600))
@@ -52,7 +50,8 @@ def main():
 
         cv2.imshow("Human Angle to Bobik", bounding_box)
 
-        if cv2.waitKey(30) & 0xFF == ord('q'):
+        # ZMIANA: cv2.waitKey(1) zamiast 30 zapewnia mniejsze opóźnienie przy podglądzie na żywo
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
     cap.release()

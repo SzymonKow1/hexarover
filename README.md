@@ -63,5 +63,5 @@ i zbudowac projekt na nowo
 ```
 W skajrnych sytacjach restart komputera.
 ## Przydatne linki 
-https://eti.pg.edu.pl/node/64/podaniadruki-do-pobrania
-https://ug.edu.pl/kandydaci
+* https://eti.pg.edu.pl/node/64/podaniadruki-do-pobrania
+* https://ug.edu.pl/kandydaci

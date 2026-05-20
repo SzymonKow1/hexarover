@@ -5,8 +5,7 @@ slam_toolbox:
     map_frame: map
     base_frame: base_link
     scan_topic: scan
-    scan_queue_size: 100
-    use_sim_time: true
+    use_sim_time: false
     use_imu_data: false # Włączamy wsparcie dla IMU
     imu_topic: /imu    # Nazwa tematu z Twojego mostka
 
@@ -14,10 +13,10 @@ slam_toolbox:
     mode: mapping 
 
     # Parametry sensora
-    max_laser_range: 10.0
+    max_laser_range: 16.0
     minimum_time_interval: 0.1
     transform_timeout: 0.2
-    tf_buffer_duration: 60.0
+    tf_buffer_duration: 30.
     stack_size_to_use: 40000000 
 
     # Ustawienia publikacji (Zwolnione, by nie przeciążać Gazebo)
@@ -27,8 +26,8 @@ slam_toolbox:
 
     # Parametry dopasowania skanów (Scan Matching)
     # Zmniejszone progi, aby SLAM "wybaczał" drgania fizyki robota
-    minimum_travel_distance: 0.05
-    minimum_travel_heading: 0.05
+    minimum_travel_distance: 0.1
+    minimum_travel_heading: 0.1
     
     # Parametry korelacji (Zwiększona precyzja)
     link_match_minimum_response_fine: 0.1

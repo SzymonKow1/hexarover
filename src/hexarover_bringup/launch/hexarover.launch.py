@@ -1,18 +1,16 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, TimerAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
 import xacro
-from launch.actions import TimerAction
 
 def generate_launch_description():
     desc_pkg_name = 'hexarover_description'
     bringup_pkg_name = 'hexarover_bringup'
-    gazebo_pkg_name = 'hexarover_gazebo'
 
     # ARGUMENTY
     rviz_arg = DeclareLaunchArgument(
@@ -25,54 +23,27 @@ def generate_launch_description():
     doc = xacro.parse(open(xacro_file))
     xacro.process_doc(doc)
     
-    # WAŻNE: use_sim_time mówi ROSowi, żeby używał zegara Gazebo
-    params = {'robot_description': doc.toxml(), 'use_sim_time': True}
+    # WAŻNE NA SPRZĘCIE: use_sim_time musi być False!
+    params = {'robot_description': doc.toxml(), 'use_sim_time': False}
 
-    # 2. KONFIGURACJA SWIATA
-    world_pkg_path = get_package_share_directory(gazebo_pkg_name)
-    world_file = os.path.join(world_pkg_path, 'worlds', 'obstacles.sdf')
-
-    # Uruchomienie Gazebo
-    gazebo = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')
-        ),
-        launch_arguments={'gz_args': f'-r {world_file}'}.items(),
-    )
-
-    # 3. SPAWN ROBOTA
-    spawn_entity = Node(
-        package='ros_gz_sim',
-        executable='create',
-        arguments=['-topic', 'robot_description', '-name', 'hexarover', '-z', '0.5'],
-        output='screen'
-    )
-
-    # 4. ROBOT STATE PUBLISHER (Mózg TFów)
+    # 2. ROBOT STATE PUBLISHER (Mózg TFów)
     node_robot_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
         output='screen',
-        parameters=[params] # Tu przekazujemy use_sim_time
+        parameters=[params]
     )
 
-    # 5. MOST (BRIDGE)
-    bridge = Node(
-        package='ros_gz_bridge',
-        executable='parameter_bridge',
-        arguments=[
-            '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock', #zegar
-            '/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
-            '/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
-            '/imu@sensor_msgs/msg/Imu@gz.msgs.IMU', #dane z imu
-            #'/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model', # Stan kół
-            '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model',
-        ],
-        output='screen',
-        parameters=[{'use_sim_time': True}]
+    # 3. JOINT STATE PUBLISHER
+    # Zastępuje to, co wcześniej robił bridge z Gazebo (publikuje stan kół dla TF)
+    joint_state_publisher_node = Node(
+        package='joint_state_publisher',
+        executable='joint_state_publisher',
+        name='joint_state_publisher',
+        parameters=[{'use_sim_time': False}]
     )
 
-    # 6. RVIZ2
+    # 4. RVIZ2
     rviz_config_file = os.path.join(
         get_package_share_directory(bringup_pkg_name), 'rviz', 'rviz.rviz'
     )
@@ -82,19 +53,10 @@ def generate_launch_description():
         executable='rviz2',
         arguments=['-d', rviz_config_file],
         condition=IfCondition(LaunchConfiguration('rviz')),
-        parameters=[{'use_sim_time': True}] # RViz też musi znać czas symulacji
+        parameters=[{'use_sim_time': False}]
     )
-    # 7. rf2o (Odometria z lasera)
-    # rf2o_config = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'rf2o.yaml')
     
-    # rf2o_node = Node(
-    #     package='rf2o_laser_odometry',
-    #     executable='rf2o_laser_odometry_node',
-    #     name='rf2o_laser_odometry',
-    #     output='screen',
-    #     parameters=[rf2o_config, {'use_sim_time': True}] # Wymuszamy czas symulacji
-    # )
-    # 7. Laser Scan Matcher (Odometria z lasera - Zastępuje rf2o)
+    # 5. Laser Scan Matcher (Odometria z lasera)
     scan_matcher_config = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'scan_matcher.yaml')
     
     scan_matcher_node = Node(
@@ -102,12 +64,13 @@ def generate_launch_description():
         executable='laser_scan_matcher',
         name='laser_scan_matcher',
         output='screen',
-        parameters=[scan_matcher_config, {'use_sim_time': True}],
+        parameters=[scan_matcher_config, {'use_sim_time': False}],
         remappings=[
-            ('/scan', '/scan') # Upewniamy się, że słucha dobrego tematu
+            ('/scan', '/scan')
         ]
     )
-     # 8. SLAM
+    
+    # 6. SLAM TOOLBOX
     slam_config_path = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'slam_toolbox.yaml')
     
     slam_toolbox_launch = IncludeLaunchDescription(
@@ -116,36 +79,35 @@ def generate_launch_description():
         ),
         launch_arguments={
             'slam_params_file': slam_config_path,
-            'use_sim_time': 'true'
+            'use_sim_time': 'false' # Parametry startowe w stringu
         }.items()
     )
-    # 9. nav2
-    pkg_bringup_path = get_package_share_directory(bringup_pkg_name) # Pobieramy pełną ścieżkę
+    
+    # 7. NAV2
+    pkg_bringup_path = get_package_share_directory(bringup_pkg_name)
     nav2_params_path = os.path.join(pkg_bringup_path, 'config', 'nav2.yaml')
     nav2_launch_dir = os.path.join(get_package_share_directory('nav2_bringup'), 'launch')
 
     nav2_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(nav2_launch_dir, 'bringup_launch.py')),
         launch_arguments={
-            'use_sim_time': 'true',
+            'use_sim_time': 'false', # Parametry startowe w stringu
             'params_file': nav2_params_path,
-            'map': '',         # PUSTA MAPA - to wyłączy map_server
+            'map': '',
             'autostart': 'true'
-    }.items()
+        }.items()
     )
+    
     delayed_nav2 = TimerAction(
-        period=5.0, # Czekamy 5 sekund
+        period=5.0, # Czekamy 5 sekund, by SLAM i odometria zdążyły wstać
         actions=[nav2_launch]
     )
      
     return LaunchDescription([
         rviz_arg,
-        gazebo,
-        bridge,
         node_robot_state_publisher,
-        spawn_entity,
+        joint_state_publisher_node,
         rviz_node,
-        #rf2o_node,        
         scan_matcher_node,
         slam_toolbox_launch,
         delayed_nav2

@@ -28,17 +28,17 @@ controller_server:
       stateful: true
       plugin: "nav2_controller::SimpleGoalChecker"
       xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.25
+      yaw_goal_tolerance: 0.3
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
 
-      desired_linear_vel: 0.5
-      lookahead_dist: 0.8
+      desired_linear_vel: 0.2
+      lookahead_dist: 0.6
       min_lookahead_dist: 0.3
       max_lookahead_dist: 0.9
       lookahead_time: 1.0
 
-      rotate_to_heading_angular_vel: 1.0
+      rotate_to_heading_angular_vel: 0.5
 
       transform_tolerance: 0.5
       use_velocity_scaled_lookahead_dist: false
@@ -74,7 +74,7 @@ local_costmap:
       height: 3
       resolution: 0.05
       #robot_radius: 0.3
-      footprint: "[ [0.225, 0.08], [0.225, -0.08], [-0.225, -0.08], [-0.225, 0.08] ]"
+      footprint: "[ [0.25, 0.15], [0.25, -0.15], [-0.25, -0.15], [-0.25, 0.15] ]"
       plugins: ["obstacle_layer", "inflation_layer"]
 
       obstacle_layer:
@@ -107,8 +107,7 @@ global_costmap:
       origin_x: 0.0
       origin_y: 0.0
       #robot_radius: 0.3
-      footprint: "[ [0.225, 0.08], [0.225, -0.08], [-0.225, -0.08], [-0.225, 0.08] ]"
-
+      footprint: "[ [0.25, 0.15], [0.25, -0.15], [-0.25, -0.15], [-0.25, 0.15] ]"
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
@@ -204,8 +203,8 @@ velocity_smoother:
     feedback: "OPEN_LOOP"
     max_velocity: [0.5, 0.0, 1.0]
     min_velocity: [-0.5, 0.0, -1.0]
-    max_accel: [1.0, 0.0, 2.0]
-    max_decel: [-1.0, 0.0, -2.0]
+    max_accel: [0.5, 0.0, 1.0]   # Zmniejszone z 1.0 i 2.0
+    max_decel: [-0.5, 0.0, -1.0] # Zmniejszone z -1.0 i -2.0
     odom_topic: "/odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]

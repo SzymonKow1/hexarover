@@ -1,7 +1,7 @@
 laser_scan_matcher:
   ros__parameters:
     # Kluczowy parametr do działania w Gazebo
-    use_sim_time: true
+    use_sim_time: false
     
     # Ramki TF (dopasowane do Twojego robota)
     base_frame: "base_link"
@@ -13,7 +13,7 @@ laser_scan_matcher:
     publish_tf: true
 
     # Parametry dopasowywania skanów (ICP)
-    max_iterations: 5
+    max_iterations: 15
     max_correspondence_dist: 0.3
     max_angular_correction_deg: 45.0
     max_linear_correction: 0.5

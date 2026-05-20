@@ -61,15 +61,17 @@ class VisionNode(Node):
             frame = cv2.resize(frame, (800, 600))
             image_width = frame.shape[1]
 
-            # B. Inferencja YOLO
-            results = self.model(frame, classes=[0], verbose=False) # class 0 = person
+            # B. Inferencja YOLO (ZMIANA: max_det=1 ogranicza detekcję do 1 obiektu)
+            results = self.model(frame, classes=[0], max_det=1, verbose=False) # class 0 = person
+            
+            # plot() narysuje teraz tylko jedną ramkę (lub zero, jeśli nikogo nie ma)
             bounding_box = results[0].plot()
 
             # C. Fuzja i obliczenia
             for r in results:
                 boxes = r.boxes
                 if len(boxes) > 0:
-                    # Bierzemy pierwszego znalezionego człowieka
+                    # Mamy pewność, że to jest jedyny (lub główny) wykryty człowiek
                     box = boxes[0]
                     x_center, y_center, width, height = box.xywh[0].tolist()
 

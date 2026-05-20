@@ -1,67 +1,215 @@
-## 🚀 Szybki Start 
+# Uruchomienie sterownika Cytron MDDS30 z Ubuntu 24.04 i testowanie działania sterownika
 
-Wykonaj poniższe kroki w terminalu, aby pobrać projekt i uruchomić symulację.
+## Sprzęt
 
-### 1. Sklonuj repozytorium
-upewnij sie ze znajdujesz sie w katalogu domowym:
+- Minikomputer SOYO M4 Mini (Ubuntu 24.04)
+- Sterownik silników Cytron SmartDriveDuo-30 (MDDS30)
+- Przejściówka USB-UART (chipset Silicon Labs CP210x)
+- Akumulator LiPo 3S 11.1V
+- Podwozie Dagu Wild Thumper 6WD (6 silników DC, 3 na kanał)
+
+## Fizyczne podłączenie
+
+Przejściówka USB-UART → Cytron MDDS30:
+- TX przejściówki → IN1 na Cytronie
+- GND przejściówki → GND na Cytronie
+- IN2 zostawić niepodłączony (nieużywany w tym trybie)
+
+UWAGA: Cytron nie wysyła danych zwrotnych, RX przejściówki zostaje wolny.
+
+## Ustawienie DIP switchy na Cytronie
+
+Pozycja: `11001100` 
+
+- SW1=1, SW2=1 → tryb Serial Simplified (UART)
+- SW3=0, SW4=0, SW5=1, SW6=1 → prędkość transmisji 9600 baud, (dokumentacja Cytron)
+- SW7=0, SW8=0 → monitoring baterii LiPo
+
+Po zmianie DIP switchy zawsze wcisnąć przycisk RESET na sterowniku.
+
+## Protokół Serial Simplified
+
+Jeden bajt to jedna komenda. Struktura bajtu Serial Simplified: 
+
+- bit 7 - kanał(0 lewy/1 prawy) 
+- bit 6 - kierunek (0 CW - Clockwise / 1 CCW - CounterClockwise) 
+- bity 5 do 0 - prędkość (00000 -> stop / 11111 inaczej decymalnie 63 -> full speed) 
+
+Bajt komendy trafia przez UART (TX) do pinu IN1 sterownika 
+
+## Sprawdzenie połączenia na Ubuntu
+
+Sprawdź czy system widzi przejściówkę USB-UART:
 ```bash
-cd
+lsusb
 ```
-repozytorium lokalnie bedzie nazywac sie ros2_ws
+Powinno pojawić się: `Silicon Labs CP210x UART Bridge`
+
+Sprawdź czy port szeregowy jest dostępny:
 ```bash
-git clone --recurse-submodules https://github.com/SzymonKow1/hexarover.git ros2_ws
+ls /dev/ttyUSB*
 ```
-### 3. Nadaniem uprawnien skryptom sh
+Powinno pojawić się: `/dev/ttyUSB0`
+
+Sprawdź grupy użytkownika:
+```bash
+groups $USER
 ```
-chmod +x dependencies.sh
-chmod +x build_and_run.sh
+Musi być `dialout` na liście. Jeśli nie ma:
+```bash
+sudo usermod -aG dialout $USER
 ```
-### 4. Instalacja zależności
-do instalacji wykorzystujemy skrypt, nalezy wpisac haslo (to samo o co prosi komputer kiedy wpisujesz komende sudo)
-```
-./dependencies.sh
-```
-### 5. Budowa i uruchomienie projektu
-Wykorzystujemy skrypt sh:
-```
-./build_and_run.sh
+Następnie zrestartować system. sudo reboot
+
+
+## Testowanie silników z Pythona
+
+Wysyłanie komend przez pyserial (zainstalowany domyślnie na Ubuntu 24.04):
+
+**Lewy silnik CW (prędkość 20/63):**
+```bash
+python3 -c "import serial; s = serial.Serial('/dev/ttyUSB0', 9600); s.write(bytes([20]))"
 ```
 
-## 📊 Wizualizacja (RViz2)
-
-Projekt posiada skonfigurowane środowisko RViz2, które uruchamia się automatycznie razem z symulacją.
-
-* **Lokalizacja konfiguracji:** `src/hexarover_bringup/rviz/rviz.rviz`
-
-## Przydatne komendy
-kręcenie w kólko:
+**Lewy silnik CCW (prędkość 20/63):**
 ```bash
-ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.5}, angular: {z: 0.2}}"
-```
-sterowaniem robotem z klawiatury 
-```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard
+python3 -c "import serial; s = serial.Serial('/dev/ttyUSB0', 9600); s.write(bytes([84]))"
 ```
 
-## 🛠 Rozwiązywanie problemów
-#### Rviz
-Jeśli po pobraniu zmian (`git pull`) RViz zgłasza błąd o braku pliku konfiguracyjnego, **musisz przebudować projekt**, aby nowy plik został zainstalowany:
+**Prawy silnik CW (prędkość 20/63):**
+```bash
+python3 -c "import serial; s = serial.Serial('/dev/ttyUSB0', 9600); s.write(bytes([148]))"
+```
 
+**Prawy silnik CCW (prędkość 20/63):**
 ```bash
-colcon build --symlink-install
-source install/setup.bash
+python3 -c "import serial; s = serial.Serial('/dev/ttyUSB0', 9600); s.write(bytes([212]))"
 ```
-#### Dziwne Zachowania Projektu
-Nalezy usunać folderu które cashują build
+
+**Stop lewy:**
 ```bash
-cd /ros2_ws
-rm -rf build/ install/ log/
+python3 -c "import serial; s = serial.Serial('/dev/ttyUSB0', 9600); s.write(bytes([0]))"
 ```
-i zbudowac projekt na nowo 
+
+**Stop prawy:**
 ```bash
-./build_and_run.sh
+python3 -c "import serial; s = serial.Serial('/dev/ttyUSB0', 9600); s.write(bytes([128]))"
 ```
-W skajrnych sytacjach restart komputera.
-## Przydatne linki 
-* https://eti.pg.edu.pl/node/64/podaniadruki-do-pobrania
-* https://ug.edu.pl/kandydaci
+
+## Kierunek jazdy robota
+
+Po weryfikacji fizycznej:
+- Jazda do przodu: lewy CCW + prawy CW
+- Jazda do tyłu: lewy CW + prawy CCW
+
+
+
+
+# Instalacja ROS2 Jazzy (Ubuntu 24.04)
+
+Aktualizacja systemu:
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
+Instalacja narzędzi:
+```bash
+sudo apt install software-properties-common curl -y
+```
+
+Dodanie klucza GPG ROS2:
+```bash
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+```
+
+Dodanie repozytorium ROS2:
+```bash
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+```
+
+Odświeżenie listy pakietów i instalacja ROS2:
+```bash
+sudo apt update
+sudo apt install ros-jazzy-desktop -y
+```
+
+Aktywacja ROS2 (jednorazowo w sesji):
+```bash
+source /opt/ros/jazzy/setup.bash
+```
+
+Dodanie do bashrc żeby działało automatycznie przy każdym otwarciu terminala:
+```bash
+echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+
+
+# Sterownik Cytrona w ROS2
+
+### Struktura paczki
+
+Paczka `cytron_driver` znajduje się w `src/cytron_driver/`.
+Główny plik to `src/cytron_driver/cytron_driver/cytron_node.py`.
+
+Węzeł subskrybuje temat `/cmd_vel` (standardowy temat ROS2 do sterowania robotem)
+i tłumaczy komendy prędkości na bajty wysyłane przez UART do Cytrona.
+
+### Pierwsze uruchomienie
+
+Zbuduj workspace:
+```bash
+cd ~/ros2_ws
+colcon build
+```
+
+Zasourcuj ROS2 i workspace (jeśli nie masz w ~/.bashrc):
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+```
+
+Uruchom węzeł:
+```bash
+ros2 run cytron_driver cytron_node
+```
+
+Powinno pojawić się: [INFO] [cytron_driver]: Cytron driver uruchomiony
+
+### Sterowanie
+
+W drugim terminalu wysyłaj komendy na temat `/cmd_vel`.
+Wartości `linear.x` i `angular.z` są w zakresie -1.0 do 1.0.
+
+Jazda do przodu:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.3}, angular: {z: 0.0}}" --once
+```
+
+Jazda do tyłu:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: -0.3}, angular: {z: 0.0}}" --once
+```
+
+Skręt w lewo:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, angular: {z: 0.3}}" --once
+```
+
+Skręt w prawo:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, angular: {z: -0.3}}" --once
+```
+
+Stop:
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, angular: {z: 0.0}}" --once
+```
+
+### Uwagi
+
+- Cytron musi być zasilony z akumulatora przed uruchomieniem węzła
+- Port szeregowy to `/dev/ttyUSB0`, baud rate 9600
+- Użytkownik musi być w grupie `dialout`
+- Silniki Dagu wytrzymują max 7.5V — nie przekraczać wartości linear.x powyżej 0.5 dopóki robot nie jest przetestowany pod obciążeniem

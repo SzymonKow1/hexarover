@@ -6,13 +6,14 @@ import serial
 MAX_SPEED = 63
 MAX_SPEED = int(MAX_SPEED*7.5/11.1)
 print(f'Max speed set to {MAX_SPEED} based on 7.5V supply')
-PORT = '/dev/ttyUSB0'
+PORT = '/dev/cytron'
 BAUD = 9600
 
 class CytronDriver(Node):
     def __init__(self):
         super().__init__('cytron_driver')
         self.serial = serial.Serial(PORT, BAUD)
+        self.serial.write(bytes([0, 128]))
         self.subscription = self.create_subscription(
             Twist,
             'cmd_vel',

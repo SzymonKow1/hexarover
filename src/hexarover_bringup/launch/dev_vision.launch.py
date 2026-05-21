@@ -22,7 +22,8 @@ def generate_launch_description():
     lidar_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(sllidar_pkg, 'launch', 'sllidar_a2m12_launch .py')
-        )
+        ),
+        launch_arguments={'serial_port': '/dev/lidar'}.items()
     )
 
     # 2. KAMERA

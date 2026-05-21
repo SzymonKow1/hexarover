@@ -84,7 +84,7 @@ class VisionNode(Node):
         frame = cv2.resize(frame, (800, 600))
         image_width = frame.shape[1]
 
-        results      = self.model(frame, classes=[0], max_det=1, verbose=False)
+        results = self.model(frame, classes=[0], max_det=1, verbose=False, conf=0.6)
         bounding_box = results[0].plot()
 
         detected = False

@@ -11,12 +11,13 @@ from cv_bridge import CvBridge
 from ultralytics import YOLO
 
 CAMERA_FOV_DEG    = 77.0
-LIDAR_OFFSET_DEG  = 0
+LIDAR_OFFSET_DEG  = 0.0
 FOV_LENGTH_M      = 3.0
 FOV_ARC_STEPS     = 30
 CLUSTER_DIST_M    = 0.3
-SEARCH_WINDOW_DEG = 8.0
+SEARCH_WINDOW_DEG = 12.0
 RAY_LENGTH_M      = 3.0
+EMA_ALPHA         = 0.7
 
 
 def calculate_angle(x_center, image_width, fov):
@@ -41,12 +42,14 @@ class VisionNode(Node):
         self.angle_pub   = self.create_publisher(Float32,     '/human_angle',      10)
         self.dist_pub    = self.create_publisher(Float32,     '/human_distance',   10)
 
-        self.lidar_offset_rad  = math.radians(LIDAR_OFFSET_DEG)
-        self.yolo_angle_rad    = None
-        self.yolo_angle_cam_deg = None  # kąt w układzie kamery [stopnie]
+        self.lidar_offset_rad   = math.radians(LIDAR_OFFSET_DEG)
+        self.yolo_angle_rad     = None
+        self.yolo_angle_cam_deg = None
+
+        self.smooth_angle = 0.0
+        self.smooth_dist  = 0.0
 
         self.create_timer(1.0, self.publish_fov_marker)
-
         self.get_logger().info("Węzeł gotowy!")
 
     # ------------------------------------------------------------------ #
@@ -74,24 +77,37 @@ class VisionNode(Node):
                 current.append(curr)
         clusters.append(current)
 
-        self.publish_clusters(clusters)
+        # self.publish_clusters(clusters)
+
+        # if self.yolo_angle_rad is not None:
+        #     self.find_and_mark_target(clusters, scan_stamp)
+        # PRZEKAZUJEMY ZNACZNIK CZASU Z SKANU
+        self.publish_clusters(clusters, msg.header.stamp)
 
         if self.yolo_angle_rad is not None:
-            self.find_and_mark_target(clusters)
+            # PRZEKAZUJEMY ZNACZNIK CZASU Z SKANU
+            self.find_and_mark_target(clusters, msg.header.stamp)
 
     def image_callback(self, msg):
         frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
         frame = cv2.resize(frame, (800, 600))
         image_width = frame.shape[1]
 
-        results = self.model(frame, classes=[0], max_det=1, verbose=False, conf=0.6)
-        bounding_box = results[0].plot()
+        results = self.model.track(
+            frame, classes=[0], max_det=1,
+            verbose=False, conf=0.5, persist=True
+        )
+        display = results[0].plot()
 
-        detected = False
+        x_center = None
+        y_center = None
+
         for r in results:
             if len(r.boxes) == 0:
                 continue
             x_center, y_center, _, _ = r.boxes[0].xywh[0].tolist()
+
+        if x_center is not None:
             angle_deg = calculate_angle(x_center, image_width, CAMERA_FOV_DEG)
 
             angle_cam_rad   = math.radians(angle_deg)
@@ -102,30 +118,29 @@ class VisionNode(Node):
             self.yolo_angle_rad     = angle_laser_rad
             self.yolo_angle_cam_deg = angle_deg
 
-            self.publish_yolo_ray(angle_laser_rad)
-            self.publish_search_window(angle_laser_rad)
+            # self.publish_yolo_ray(angle_laser_rad)
+            # self.publish_search_window(angle_laser_rad)
+            # Przekazujemy również czas do promieni YOLO
+            self.publish_yolo_ray(angle_laser_rad, msg.header.stamp)
+            self.publish_search_window(angle_laser_rad, msg.header.stamp)
 
-            cv2.putText(bounding_box, f"Angle: {angle_deg:.1f} deg",
+            cv2.putText(display, f"Angle: {angle_deg:.1f} deg",
                         (int(x_center) - 50, int(y_center) - 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            detected = True
-
-        if not detected:
+        else:
             self.yolo_angle_rad     = None
             self.yolo_angle_cam_deg = None
             self.clear_yolo_markers()
 
-        cv2.imshow("Hexarover AI Vision", bounding_box)
+        cv2.imshow("Hexarover AI Vision", display)
         cv2.waitKey(1)
 
     # ------------------------------------------------------------------ #
 
-    def find_and_mark_target(self, clusters):
+    def find_and_mark_target(self, clusters, scan_stamp):
         half_window = math.radians(SEARCH_WINDOW_DEG)
 
-        best_cluster  = None
-        best_distance = float('inf')
-
+        candidates = []
         for cluster in clusters:
             angle_mean = sum(p[3] for p in cluster) / len(cluster)
             diff = abs(math.atan2(
@@ -135,32 +150,57 @@ class VisionNode(Node):
             if diff > half_window:
                 continue
             dist_min = min(p[2] for p in cluster)
-            if dist_min < best_distance:
-                best_distance = dist_min
-                best_cluster  = cluster
+            candidates.append((dist_min, cluster))
 
-        if best_cluster is None:
+        if not candidates:
             return
 
-        cx = sum(p[0] for p in best_cluster) / len(best_cluster)
-        cy = sum(p[1] for p in best_cluster) / len(best_cluster)
+        candidates.sort(key=lambda c: c[0])
 
+        if len(candidates) >= 2:
+            c1 = candidates[0][1]
+            c2 = candidates[1][1]
+            cx1 = sum(p[0] for p in c1) / len(c1)
+            cy1 = sum(p[1] for p in c1) / len(c1)
+            cx2 = sum(p[0] for p in c2) / len(c2)
+            cy2 = sum(p[1] for p in c2) / len(c2)
+            dist_between = math.hypot(cx2 - cx1, cy2 - cy1)
+
+            if dist_between <= 0.6:
+                top = candidates[:2]
+            else:
+                top = candidates[:1]
+        else:
+            top = candidates[:1]
+
+        all_points    = [p for _, cluster in top for p in cluster]
+        cx            = sum(p[0] for p in all_points) / len(all_points)
+        cy            = sum(p[1] for p in all_points) / len(all_points)
+        best_distance = min(c[0] for c in top)
+
+        # ─── NAPRAWA FILTRA EMA ──────────────────────────────────────
+        # Jeśli to pierwsze wykrycie (wartość to 0.0), przejmij od razu prawdziwą wartość
+        if self.smooth_dist == 0.0:
+            self.smooth_angle = self.yolo_angle_cam_deg
+            self.smooth_dist  = best_distance
+        else:
+            self.smooth_angle = EMA_ALPHA * self.yolo_angle_cam_deg + (1 - EMA_ALPHA) * self.smooth_angle
+            self.smooth_dist  = EMA_ALPHA * best_distance           + (1 - EMA_ALPHA) * self.smooth_dist
+        # ─────────────────────────────────────────────────────────────
         self.get_logger().info(
-            f"CZŁOWIEK | Dist: {best_distance:.2f}m | X:{cx:.2f} Y:{cy:.2f}")
+            f"CZŁOWIEK | Dist: {self.smooth_dist:.2f}m | X:{cx:.2f} Y:{cy:.2f}")
 
-        # ── publikuj kąt i dystans dla follower_node ──────────────────
         angle_msg      = Float32()
-        angle_msg.data = float(self.yolo_angle_cam_deg)
+        angle_msg.data = float(self.smooth_angle)
         self.angle_pub.publish(angle_msg)
 
         dist_msg      = Float32()
-        dist_msg.data = float(best_distance)
+        dist_msg.data = float(self.smooth_dist)
         self.dist_pub.publish(dist_msg)
 
-        # ── marker RViz ───────────────────────────────────────────────
         marker                  = Marker()
-        marker.header.frame_id  = 'lidar_link' 
-        marker.header.stamp     = self.get_clock().now().to_msg()
+        marker.header.frame_id  = 'base_link'
+        marker.header.stamp     = scan_stamp
         marker.ns               = 'human_target'
         marker.id               = 0
         marker.type             = Marker.SPHERE
@@ -181,10 +221,10 @@ class VisionNode(Node):
 
     # ------------------------------------------------------------------ #
 
-    def publish_yolo_ray(self, angle_rad):
+    def publish_yolo_ray(self, angle_rad, msg_stamp):
         marker                  = Marker()
-        marker.header.frame_id  = 'lidar_link' 
-        marker.header.stamp     = self.get_clock().now().to_msg()
+        marker.header.frame_id  = 'base_link'
+        marker.header.stamp     = msg_stamp
         marker.ns               = 'yolo_ray'
         marker.id               = 0
         marker.type             = Marker.LINE_LIST
@@ -204,7 +244,7 @@ class VisionNode(Node):
         ))
         self.ray_pub.publish(marker)
 
-    def publish_search_window(self, angle_rad):
+    def publish_search_window(self, angle_rad, msg_stamp):
         half_w = math.radians(SEARCH_WINDOW_DEG)
         origin = Point(x=0.0, y=0.0, z=0.0)
         pts    = []
@@ -220,8 +260,8 @@ class VisionNode(Node):
         pts.append(origin)
 
         marker                  = Marker()
-        marker.header.frame_id  = 'lidar_link' 
-        marker.header.stamp     = self.get_clock().now().to_msg()
+        marker.header.frame_id  = 'base_link'
+        marker.header.stamp     = msg_stamp
         marker.ns               = 'yolo_window'
         marker.id               = 0
         marker.type             = Marker.LINE_STRIP
@@ -239,19 +279,19 @@ class VisionNode(Node):
     def clear_yolo_markers(self):
         for pub, ns in [(self.ray_pub, 'yolo_ray'), (self.window_pub, 'yolo_window')]:
             marker                 = Marker()
-            marker.header.frame_id = 'lidar_link' 
+            marker.header.frame_id = 'base_link'
             marker.header.stamp    = self.get_clock().now().to_msg()
             marker.ns              = ns
             marker.id              = 0
             marker.action          = Marker.DELETE
             pub.publish(marker)
 
-    def publish_clusters(self, clusters):
+    def publish_clusters(self, clusters, scan_stamp):
         marker_array = MarkerArray()
         for idx, cluster in enumerate(clusters):
             marker                  = Marker()
-            marker.header.frame_id  = 'lidar_link' 
-            marker.header.stamp     = self.get_clock().now().to_msg()
+            marker.header.frame_id  = 'base_link'
+            marker.header.stamp     = scan_stamp
             marker.ns               = 'clusters'
             marker.id               = idx
             marker.type             = Marker.POINTS
@@ -286,7 +326,7 @@ class VisionNode(Node):
         pts.append(origin)
 
         marker                  = Marker()
-        marker.header.frame_id  = 'lidar_link' 
+        marker.header.frame_id  = 'base_link'
         marker.header.stamp     = self.get_clock().now().to_msg()
         marker.ns               = 'camera_fov'
         marker.id               = 0

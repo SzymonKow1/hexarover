@@ -152,7 +152,21 @@
     <child link="imu_link"/>
     <origin xyz="${imu_x} ${imu_y} ${imu_z}" rpy="0 0 ${imu_yaw}"/> 
   </joint>
+  <!-- CAMERA -->
+  <link name="camera_link">
+  <visual>
+    <geometry>
+      <box size="0.02 0.05 0.03"/>
+    </geometry>
+    <material name="black"/>
+  </visual>
+</link>
 
+<joint name="camera_joint" type="fixed">
+  <parent link="base_link"/>
+  <child link="camera_link"/>
+  <origin xyz="0.2 0 0.05" rpy="0 0 0"/>
+</joint>
   <!-- GAZEBO PLUGINS -->
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
@@ -243,5 +257,25 @@
       <gz_frame_id>imu_link</gz_frame_id>
     </sensor>
   </gazebo>
+  <gazebo reference="camera_link">
+  <sensor name="camera" type="camera">
+    <camera>
+      <horizontal_fov>1.34</horizontal_fov> <image>
+        <width>800</width>
+        <height>600</height>
+        <format>R8G8B8</format>
+      </image>
+      <clip>
+        <near>0.1</near>
+        <far>10.0</far>
+      </clip>
+    </camera>
+    <always_on>1</always_on>
+    <update_rate>30</update_rate>
+    <visualize>true</visualize>
+    <topic>image_raw</topic>
+    
+  </sensor>
+</gazebo>
 
 </robot>

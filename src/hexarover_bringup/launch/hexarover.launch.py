@@ -67,6 +67,7 @@ def generate_launch_description():
             '/imu@sensor_msgs/msg/Imu@gz.msgs.IMU', #dane z imu
             #'/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model', # Stan kół
             '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model',
+            '/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
         ],
         output='screen',
         parameters=[{'use_sim_time': True}]
@@ -147,9 +148,25 @@ def generate_launch_description():
         output='screen',
         parameters=[ekf_config_path, {'use_sim_time': True}]
     )
+     
     # static_tf_node = Node(
     #         package='tf2_ros',
     #         executable='static_transform_publisher')
+
+    # 11. vision node
+    vision_node = Node(
+        package='hexarover_vision',
+        executable='vision_node',
+        name='vision_node',
+        output='screen',
+        parameters=[{'use_sim_time': True}]
+    )
+    # rqt_image_view_node = Node(
+    #     package='rqt_image_view',
+    #     executable='rqt_image_view',
+    #     arguments=['/image_raw'],
+    #     output='screen'
+    # )
     return LaunchDescription([
         rviz_arg,
         gazebo,
@@ -162,6 +179,8 @@ def generate_launch_description():
         scan_matcher_node,
         slam_toolbox_launch,
         #static_tf_node,
-        nav2_launch
+        nav2_launch,
+        vision_node
+        #rqt_image_view_node
         # delayed_nav2
     ])

@@ -48,7 +48,7 @@ controller_server:
 
       use_collision_detection: false
 
-      allow_reversing: false
+      allow_reversing: true
 
 planner_server:
   ros__parameters:

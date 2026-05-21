@@ -25,7 +25,8 @@ setup(
     entry_points={
         'console_scripts': [
             'vision_node = hexarover_vision.vision_node:main',
-            'video_publisher = hexarover_vision.video_publisher:main'
+            'video_publisher = hexarover_vision.video_publisher:main',
+            'follower_node = hexarover_vision.follower_node:main'
         ],
     },
 )

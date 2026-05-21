@@ -167,6 +167,14 @@ def generate_launch_description():
     #     arguments=['/image_raw'],
     #     output='screen'
     # )
+    #12. follower node
+    follower_node = Node(
+        package='hexarover_vision',
+        executable='follower_node',
+        name='follower_node',
+        output='screen',
+        parameters=[{'use_sim_time': True}]
+    )
     return LaunchDescription([
         rviz_arg,
         gazebo,
@@ -180,7 +188,8 @@ def generate_launch_description():
         slam_toolbox_launch,
         #static_tf_node,
         nav2_launch,
-        vision_node
+        vision_node,
+        follower_node
         #rqt_image_view_node
         # delayed_nav2
     ])

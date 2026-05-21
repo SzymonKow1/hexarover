@@ -62,7 +62,7 @@
       </link>
     </model>
 
-    <model name="wall_1">
+    <!-- <model name="wall_1">
       <static>true</static>
       <pose>2 0 0.5 0 0 0</pose>
       <link name="link">
@@ -85,7 +85,8 @@
           </material>
         </visual>
       </link>
-    </model>
+    </model> -->
+
     <model name="wall_north">
       <static>true</static>
       <pose>0 4.2 0.5 0 0 0</pose>
@@ -200,12 +201,39 @@
         </visual>
       </link>
     </model>
-
+    <!-- 1.stanie -->
     <include>
       <name>Walking_Person</name>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Walking%20person</uri>
-      <pose>1.0 0.0 0.0 0 0 -1.57</pose>
+      <pose>3.7 0.0 0.0 0 0 -1.57</pose>
     </include>
+    <!-- 2. idzie prosto -->
 
+
+    <!-- 3. kolo -->
+    <!-- <actor name="actor_walking">
+      <skin>
+        <filename>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Walking%20person/tip/files/meshes/walking.dae</filename>
+        <scale>1.0</scale>
+      </skin>
+      <animation name="walking">
+        <filename>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Walking%20person/tip/files/meshes/walking.dae</filename>
+        <interpolate_x>true</interpolate_x>
+      </animation>
+
+      <script>
+        <loop>true</loop>
+        <delay_start>0.0</delay_start>
+        <auto_start>true</auto_start>
+        <trajectory id="0" type="walking">
+          <waypoint><time>0.0</time><pose>3.0 -3.0 0 0 0 1.57</pose></waypoint>
+          <waypoint><time>10.0</time><pose>3.0 3.0 0 0 0 3.14</pose></waypoint>
+          <waypoint><time>20.0</time><pose>-3.0 3.0 0 0 0 -1.57</pose></waypoint>
+          <waypoint><time>30.0</time><pose>-3.0 -3.0 0 0 0 0.0</pose></waypoint>
+          <waypoint><time>40.0</time><pose>3.0 -3.0 0 0 0 1.57</pose></waypoint>
+        </trajectory>
+      </script>
+    </actor>
+     -->
   </world>
 </sdf>

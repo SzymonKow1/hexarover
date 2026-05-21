@@ -5,50 +5,18 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /LaserScan1
-        - /Marker1
       Splitter Ratio: 0.5
-    Tree Height: 549
+    Tree Height: 229
   - Class: rviz_common/Selection
     Name: Selection
   - Class: rviz_common/Views
-    Invert Zero Pitch: false
+    Expanded:
+      - /Current View1
     Name: Views
-    Saved:
-      - Class: rviz_default_plugins/TopDownOrtho
-        Angle: 0
-        Enable Stereo Rendering:
-          Stereo Eye Separation: 0.05999999865889549
-          Stereo Focal Distance: 1
-          Swap Stereo Eyes: false
-          Value: false
-        Invert Z Axis: false
-        Name: TopDown (domyślny)
-        Near Clip Distance: 0.009999999776482582
-        Scale: 80
-        Target Frame: laser
-        Value: TopDownOrtho (rviz_default_plugins)
-        X: 0
-        Y: 0
-    Current:
-      Class: rviz_default_plugins/TopDownOrtho
-      Angle: 0
-      Enable Stereo Rendering:
-        Stereo Eye Separation: 0.05999999865889549
-        Stereo Focal Distance: 1
-        Swap Stereo Eyes: false
-        Value: false
-      Invert Z Axis: false
-      Name: TopDown
-      Near Clip Distance: 0.009999999776482582
-      Scale: 80
-      Target Frame: laser
-      Value: TopDownOrtho (rviz_default_plugins)
-      X: 0
-      Y: 0
+    Splitter Ratio: 0.5
 Visualization Manager:
   Class: ""
   Displays:
-    # ── 1. Skan lasera ───────────────────────────────────────────────────
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -58,7 +26,7 @@ Visualization Manager:
       Axis: Z
       Channel Name: intensity
       Class: rviz_default_plugins/LaserScan
-      Color: 255; 255; 255       # białe punkty
+      Color: 255; 255; 255
       Color Transformer: FlatColor
       Decay Time: 0
       Enabled: true
@@ -83,13 +51,11 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
-
-    # ── 2. Marker człowieka (zielony cylinder z vision_node) ─────────────
     - Class: rviz_default_plugins/Marker
       Enabled: true
       Name: Marker - human
       Namespaces:
-        rescue_target: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -98,24 +64,28 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /human_marker
       Value: true
-
-    # ── 3. TF – ramki współrzędnych (laser, lidar_link, camera_link) ─────
     - Class: rviz_default_plugins/TF
       Enabled: true
+      Filter (blacklist): ""
+      Filter (whitelist): ""
       Frame Timeout: 15
       Frames:
         All Enabled: true
+        laser:
+          Value: true
+        lidar_link:
+          Value: true
       Marker Scale: 0.5
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        {}
+        laser:
+          lidar_link:
+            {}
       Update Interval: 0
       Value: true
-
-    # ── 4. Oś robota / origin ─────────────────────────────────────────────
     - Class: rviz_default_plugins/Axes
       Enabled: true
       Length: 0.5
@@ -123,7 +93,70 @@ Visualization Manager:
       Radius: 0.009999999776482582
       Reference Frame: laser
       Value: true
-
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Marker
+      Namespaces:
+        camera_fov: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /camera_fov
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Marker
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /human_marker
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: MarkerArray
+      Namespaces:
+        clusters: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /lidar_clusters
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Marker
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /yolo_ray
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Marker
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /yolo_window
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 25; 25; 25
@@ -135,14 +168,25 @@ Visualization Manager:
       Hide Inactive Objects: true
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/Select
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
   Value: true
   Views:
     Current:
-      Class: rviz_default_plugins/TopDownOrtho
       Angle: 0
-      Name: TopDown
-      Scale: 80
+      Class: rviz_default_plugins/TopDownOrtho
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Scale: 113.24382781982422
       Target Frame: laser
+      Value: TopDownOrtho (rviz_default_plugins)
       X: 0
       Y: 0
     Saved: ~
@@ -152,9 +196,11 @@ Window Geometry:
   Height: 900
   Hide Left Dock: false
   Hide Right Dock: true
-  QMainWindow State: ""
+  QMainWindow State: 000000ff00000000fd0000000100000000000001c900000326fc0200000003fb000000100044006900730070006c006100790073010000003f00000173000000cc00fffffffb0000001200530065006c0065006300740069006f006e01000001b8000000b40000005d00fffffffb0000000a005600690065007700730100000272000000f3000000a900ffffff000003a90000032600000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Selection:
+    collapsed: false
   Views:
     collapsed: false
   Width: 1400
-  X: 50
+  X: 66
   Y: 50

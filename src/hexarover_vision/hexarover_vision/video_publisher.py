@@ -15,7 +15,7 @@ class CameraPublisher(Node):
         self.bridge = CvBridge()
         
         # 3. Otwieramy domyślną kamerę systemową (indeks 0 to zazwyczaj /dev/video0 w Ubuntu)
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(1)
         
         if not self.cap.isOpened():
             self.get_logger().error("Nie mogę otworzyć domyślnej kamery (indeks 0). Sprawdź podłączenie!")

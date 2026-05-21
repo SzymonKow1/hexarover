@@ -15,7 +15,7 @@ LIDAR_OFFSET_DEG  = -90.0
 FOV_LENGTH_M      = 3.0
 FOV_ARC_STEPS     = 30
 CLUSTER_DIST_M    = 0.3
-SEARCH_WINDOW_DEG = 8.0
+SEARCH_WINDOW_DEG = 12.0
 RAY_LENGTH_M      = 3.0
 
 # ── Tracker ──────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ RAY_LENGTH_M      = 3.0
 # Zwiększ jeśli CPU za mocno obciążone, zmniejsz jeśli tracker za często gubi
 YOLO_EVERY_N_FRAMES = 5
 # ─────────────────────────────────────────────────────────────────────
-
+EMA_ALPHA = 0.7  # 0.0 = brak reakcji, 1.0 = brak wygładzania
 
 def calculate_angle(x_center, image_width, fov):
     return ((image_width / 2.0) - x_center) * (fov / image_width)
@@ -50,6 +50,9 @@ class VisionNode(Node):
         self.lidar_offset_rad   = math.radians(LIDAR_OFFSET_DEG)
         self.yolo_angle_rad     = None
         self.yolo_angle_cam_deg = None
+
+        self.smooth_angle = 0.0
+        self.smooth_dist  = 0.0
 
         # tracker
         self.tracker         = None   # instancja CSRT
@@ -173,9 +176,8 @@ class VisionNode(Node):
     def find_and_mark_target(self, clusters):
         half_window = math.radians(SEARCH_WINDOW_DEG)
 
-        best_cluster  = None
-        best_distance = float('inf')
-
+        # zbierz wszystkie klastry w oknie kątowym
+        candidates = []
         for cluster in clusters:
             angle_mean = sum(p[3] for p in cluster) / len(cluster)
             diff = abs(math.atan2(
@@ -185,25 +187,54 @@ class VisionNode(Node):
             if diff > half_window:
                 continue
             dist_min = min(p[2] for p in cluster)
-            if dist_min < best_distance:
-                best_distance = dist_min
-                best_cluster  = cluster
+            candidates.append((dist_min, cluster))
 
-        if best_cluster is None:
+        if not candidates:
             return
 
-        cx = sum(p[0] for p in best_cluster) / len(best_cluster)
-        cy = sum(p[1] for p in best_cluster) / len(best_cluster)
+        # posortuj po odległości, weź dwa najbliższe
+        candidates.sort(key=lambda c: c[0])
+
+        if len(candidates) >= 2:
+            # sprawdź odległość między centroidami dwóch najbliższych klastrów
+            c1 = candidates[0][1]
+            c2 = candidates[1][1]
+            cx1 = sum(p[0] for p in c1) / len(c1)
+            cy1 = sum(p[1] for p in c1) / len(c1)
+            cx2 = sum(p[0] for p in c2) / len(c2)
+            cy2 = sum(p[1] for p in c2) / len(c2)
+            dist_between = math.hypot(cx2 - cx1, cy2 - cy1)
+
+            if dist_between <= 0.6:
+                # dwie nogi blisko siebie – centroid obu
+                top = candidates[:2]
+            else:
+                # klastry za daleko od siebie – tylko najbliższy
+                top = candidates[:1]
+        else:
+            top = candidates[:1]
+
+        # centroid ze wszystkich punktów wybranych klastrów
+        all_points = [p for _, cluster in top for p in cluster]
+        cx = sum(p[0] for p in all_points) / len(all_points)
+        cy = sum(p[1] for p in all_points) / len(all_points)
+        best_distance = min(c[0] for c in top)
+
+        # EMA
+        self.smooth_angle = EMA_ALPHA * self.yolo_angle_cam_deg + (1 - EMA_ALPHA) * self.smooth_angle
+        self.smooth_dist  = EMA_ALPHA * best_distance           + (1 - EMA_ALPHA) * self.smooth_dist
+
+        # reszta bez zmian...
 
         self.get_logger().info(
-            f"CZŁOWIEK | Dist: {best_distance:.2f}m | X:{cx:.2f} Y:{cy:.2f}")
+            f"CZŁOWIEK | Dist: {self.smooth_dist:.2f}m | X:{cx:.2f} Y:{cy:.2f}")
 
         angle_msg      = Float32()
-        angle_msg.data = float(self.yolo_angle_cam_deg)
+        angle_msg.data = float(self.smooth_angle)
         self.angle_pub.publish(angle_msg)
 
         dist_msg      = Float32()
-        dist_msg.data = float(best_distance)
+        dist_msg.data = float(self.smooth_dist)
         self.dist_pub.publish(dist_msg)
 
         marker                  = Marker()

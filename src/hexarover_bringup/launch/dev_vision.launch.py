@@ -86,8 +86,8 @@ def generate_launch_description():
         lidar_launch,
         video_publisher_node,
         vision_node,
-        follower_node,
-        cytron_node,
+        #follower_node,
+        #cytron_node,
         tf_laser_to_lidar_link,
         rviz_node,
     ])

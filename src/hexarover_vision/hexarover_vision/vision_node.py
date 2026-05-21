@@ -17,13 +17,8 @@ FOV_ARC_STEPS     = 30
 CLUSTER_DIST_M    = 0.3
 SEARCH_WINDOW_DEG = 12.0
 RAY_LENGTH_M      = 3.0
+EMA_ALPHA         = 0.7
 
-# ── Tracker ──────────────────────────────────────────────────────────
-# YOLO odpala co N klatek, między nimi CSRT śledzi bbox
-# Zwiększ jeśli CPU za mocno obciążone, zmniejsz jeśli tracker za często gubi
-YOLO_EVERY_N_FRAMES = 5
-# ─────────────────────────────────────────────────────────────────────
-EMA_ALPHA = 0.7  # 0.0 = brak reakcji, 1.0 = brak wygładzania
 
 def calculate_angle(x_center, image_width, fov):
     return ((image_width / 2.0) - x_center) * (fov / image_width)
@@ -53,11 +48,6 @@ class VisionNode(Node):
 
         self.smooth_angle = 0.0
         self.smooth_dist  = 0.0
-
-        # tracker
-        self.tracker         = None   # instancja CSRT
-        self.tracker_ok      = False  # czy tracker aktywny i działa
-        self.frame_count     = 0      # licznik klatek
 
         self.create_timer(1.0, self.publish_fov_marker)
         self.get_logger().info("Węzeł gotowy!")
@@ -97,55 +87,20 @@ class VisionNode(Node):
         frame = cv2.resize(frame, (800, 600))
         image_width = frame.shape[1]
 
-        self.frame_count += 1
-        run_yolo = (self.frame_count % YOLO_EVERY_N_FRAMES == 0)
+        results = self.model.track(
+            frame, classes=[0], max_det=1,
+            verbose=False, conf=0.5, persist=True
+        )
+        display = results[0].plot()
 
         x_center = None
         y_center = None
-        display  = frame.copy()
 
-        # ── YOLO co N klatek ─────────────────────────────────────────
-        if run_yolo:
-            results = self.model(frame, classes=[0], max_det=1, verbose=False, conf=0.6)
-            display = results[0].plot()
+        for r in results:
+            if len(r.boxes) == 0:
+                continue
+            x_center, y_center, _, _ = r.boxes[0].xywh[0].tolist()
 
-            for r in results:
-                if len(r.boxes) == 0:
-                    # YOLO nie widzi – reset trackera
-                    self.tracker_ok = False
-                    continue
-
-                x1, y1, x2, y2 = r.boxes[0].xyxy[0].tolist()
-                x_center = (x1 + x2) / 2.0
-                y_center = (y1 + y2) / 2.0
-
-                # reinicjalizuj tracker nowym bboxem z YOLO
-                bbox = (int(x1), int(y1), int(x2 - x1), int(y2 - y1))
-                self.tracker    = cv2.legacy.TrackerCSRT_create()
-                self.tracker_ok = self.tracker.init(frame, bbox)
-
-                cv2.putText(display, "YOLO",
-                            (int(x1), int(y1) - 25),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-        # ── Tracker między klatkami YOLO ─────────────────────────────
-        elif self.tracker_ok and self.tracker is not None:
-            ok, bbox = self.tracker.update(frame)
-            if ok:
-                tx, ty, tw, th = [int(v) for v in bbox]
-                x_center = tx + tw / 2.0
-                y_center = ty + th / 2.0
-
-                # rysuj bbox trackera (inny kolor niż YOLO)
-                cv2.rectangle(display, (tx, ty), (tx + tw, ty + th), (255, 100, 0), 2)
-                cv2.putText(display, "TRACKER",
-                            (tx, ty - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 100, 0), 2)
-            else:
-                # tracker zgubił obiekt
-                self.tracker_ok = False
-
-        # ── Oblicz kąt z aktualnej pozycji (YOLO lub tracker) ────────
         if x_center is not None:
             angle_deg = calculate_angle(x_center, image_width, CAMERA_FOV_DEG)
 
@@ -176,7 +131,6 @@ class VisionNode(Node):
     def find_and_mark_target(self, clusters):
         half_window = math.radians(SEARCH_WINDOW_DEG)
 
-        # zbierz wszystkie klastry w oknie kątowym
         candidates = []
         for cluster in clusters:
             angle_mean = sum(p[3] for p in cluster) / len(cluster)
@@ -192,11 +146,9 @@ class VisionNode(Node):
         if not candidates:
             return
 
-        # posortuj po odległości, weź dwa najbliższe
         candidates.sort(key=lambda c: c[0])
 
         if len(candidates) >= 2:
-            # sprawdź odległość między centroidami dwóch najbliższych klastrów
             c1 = candidates[0][1]
             c2 = candidates[1][1]
             cx1 = sum(p[0] for p in c1) / len(c1)
@@ -206,25 +158,19 @@ class VisionNode(Node):
             dist_between = math.hypot(cx2 - cx1, cy2 - cy1)
 
             if dist_between <= 0.6:
-                # dwie nogi blisko siebie – centroid obu
                 top = candidates[:2]
             else:
-                # klastry za daleko od siebie – tylko najbliższy
                 top = candidates[:1]
         else:
             top = candidates[:1]
 
-        # centroid ze wszystkich punktów wybranych klastrów
-        all_points = [p for _, cluster in top for p in cluster]
-        cx = sum(p[0] for p in all_points) / len(all_points)
-        cy = sum(p[1] for p in all_points) / len(all_points)
+        all_points    = [p for _, cluster in top for p in cluster]
+        cx            = sum(p[0] for p in all_points) / len(all_points)
+        cy            = sum(p[1] for p in all_points) / len(all_points)
         best_distance = min(c[0] for c in top)
 
-        # EMA
         self.smooth_angle = EMA_ALPHA * self.yolo_angle_cam_deg + (1 - EMA_ALPHA) * self.smooth_angle
         self.smooth_dist  = EMA_ALPHA * best_distance           + (1 - EMA_ALPHA) * self.smooth_dist
-
-        # reszta bez zmian...
 
         self.get_logger().info(
             f"CZŁOWIEK | Dist: {self.smooth_dist:.2f}m | X:{cx:.2f} Y:{cy:.2f}")

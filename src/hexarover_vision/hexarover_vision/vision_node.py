@@ -3,181 +3,314 @@ import math
 import cv2
 from rclpy.node import Node
 
-# Importy wiadomości ROS 2
-from sensor_msgs.msg import Image, LaserScan
+from sensor_msgs.msg import LaserScan, Image
+from visualization_msgs.msg import Marker, MarkerArray
+from geometry_msgs.msg import Point
 from std_msgs.msg import Float32
-from visualization_msgs.msg import Marker
-
-# Importy dla obrazu i AI
 from cv_bridge import CvBridge
 from ultralytics import YOLO
 
-# Parametr kamery
-CAMERA_FOV_DEG = 77.0
+CAMERA_FOV_DEG    = 77.0
+LIDAR_OFFSET_DEG  = -90.0
+FOV_LENGTH_M      = 3.0
+FOV_ARC_STEPS     = 30
+CLUSTER_DIST_M    = 0.3
+SEARCH_WINDOW_DEG = 8.0
+RAY_LENGTH_M      = 3.0
+
 
 def calculate_angle(x_center, image_width, fov):
-    """Oblicza kąt odchylenia od centrum obrazu w stopniach."""
-    center_of_camera = image_width / 2.0
-    # W ROS kąty w lewo są dodatnie, w prawo ujemne. 
-    # Piksele rosną w prawo, więc odwracamy logikę:
-    pixel_difference = center_of_camera - x_center 
-    angle_per_pixel = fov / image_width
-    return pixel_difference * angle_per_pixel
+    return ((image_width / 2.0) - x_center) * (fov / image_width)
+
 
 class VisionNode(Node):
     def __init__(self):
         super().__init__('vision_node')
-        self.get_logger().info("Ładowanie modelu YOLOv8...")
 
-        # 1. Inicjalizacja modelu YOLO
-        self.model = YOLO("yolov8n.pt")
-        
-        # 2. Most OpenCV <-> ROS
         self.bridge = CvBridge()
+        self.model  = YOLO("yolov8n.pt")
 
-        # 3. Subskrypcja obrazu (Kamera)
-        self.image_sub = self.create_subscription(Image, '/image_raw', self.image_callback, 10)
-            
-        # 4. Subskrypcja LiDARu (Laser)
-        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.latest_scan = None
-        
-        # 5. Publikator kąta 
-        self.angle_pub = self.create_publisher(Float32, '/human_angle', 10)
+        self.scan_sub  = self.create_subscription(LaserScan, '/scan',      self.scan_callback,  10)
+        self.image_sub = self.create_subscription(Image,     '/image_raw', self.image_callback, 10)
 
-        # 6. Publikator Markera dla RViz2
-        self.marker_pub = self.create_publisher(Marker, '/human_marker', 10)
-        
-        self.get_logger().info("Węzeł gotowy, fuzja sensoryczna uruchomiona!")
+        self.fov_pub     = self.create_publisher(Marker,      '/camera_fov',      10)
+        self.cluster_pub = self.create_publisher(MarkerArray, '/lidar_clusters',   10)
+        self.ray_pub     = self.create_publisher(Marker,      '/yolo_ray',         10)
+        self.window_pub  = self.create_publisher(Marker,      '/yolo_window',      10)
+        self.target_pub  = self.create_publisher(Marker,      '/human_marker',     10)
+        self.angle_pub   = self.create_publisher(Float32,     '/human_angle',      10)
+        self.dist_pub    = self.create_publisher(Float32,     '/human_distance',   10)
+
+        self.lidar_offset_rad  = math.radians(LIDAR_OFFSET_DEG)
+        self.yolo_angle_rad    = None
+        self.yolo_angle_cam_deg = None  # kąt w układzie kamery [stopnie]
+
+        self.create_timer(1.0, self.publish_fov_marker)
+
+        self.get_logger().info("Węzeł gotowy!")
+
+    # ------------------------------------------------------------------ #
 
     def scan_callback(self, msg):
-        """Aktualizuje najnowszy odczyt z lasera w tle."""
-        self.latest_scan = msg
+        points = []
+        for i, d in enumerate(msg.ranges):
+            if math.isinf(d) or math.isnan(d):
+                continue
+            if not (msg.range_min < d < msg.range_max):
+                continue
+            a = msg.angle_min + i * msg.angle_increment
+            points.append((d * math.cos(a), d * math.sin(a), d, a))
+
+        if not points:
+            return
+
+        clusters = []
+        current  = [points[0]]
+        for prev, curr in zip(points, points[1:]):
+            if math.hypot(curr[0] - prev[0], curr[1] - prev[1]) > CLUSTER_DIST_M:
+                clusters.append(current)
+                current = [curr]
+            else:
+                current.append(curr)
+        clusters.append(current)
+
+        self.publish_clusters(clusters)
+
+        if self.yolo_angle_rad is not None:
+            self.find_and_mark_target(clusters)
 
     def image_callback(self, msg):
-        try:
-            # A. Konwersja i skalowanie
-            frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-            frame = cv2.resize(frame, (800, 600))
-            image_width = frame.shape[1]
+        frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+        frame = cv2.resize(frame, (800, 600))
+        image_width = frame.shape[1]
 
-            # B. Inferencja YOLO (ZMIANA: max_det=1 ogranicza detekcję do 1 obiektu)
-            results = self.model(frame, classes=[0], max_det=1, verbose=False) # class 0 = person
-            
-            # plot() narysuje teraz tylko jedną ramkę (lub zero, jeśli nikogo nie ma)
-            bounding_box = results[0].plot()
+        results      = self.model(frame, classes=[0], max_det=1, verbose=False)
+        bounding_box = results[0].plot()
 
-            # C. Fuzja i obliczenia
-            for r in results:
-                boxes = r.boxes
-                if len(boxes) > 0:
-                    # Mamy pewność, że to jest jedyny (lub główny) wykryty człowiek
-                    box = boxes[0]
-                    x_center, y_center, width, height = box.xywh[0].tolist()
+        detected = False
+        for r in results:
+            if len(r.boxes) == 0:
+                continue
+            x_center, y_center, _, _ = r.boxes[0].xywh[0].tolist()
+            angle_deg = calculate_angle(x_center, image_width, CAMERA_FOV_DEG)
 
-                    # Obliczenie kąta w stopniach i radianach
-                    angle_deg = calculate_angle(x_center, image_width, CAMERA_FOV_DEG)
-                    angle_rad = math.radians(angle_deg)
+            angle_cam_rad   = math.radians(angle_deg)
+            angle_laser_rad = math.atan2(
+                math.sin(angle_cam_rad + self.lidar_offset_rad),
+                math.cos(angle_cam_rad + self.lidar_offset_rad)
+            )
+            self.yolo_angle_rad     = angle_laser_rad
+            self.yolo_angle_cam_deg = angle_deg
 
-                    # Publikacja samego kąta
-                    angle_msg = Float32()
-                    angle_msg.data = float(angle_deg)
-                    self.angle_pub.publish(angle_msg)
+            self.publish_yolo_ray(angle_laser_rad)
+            self.publish_search_window(angle_laser_rad)
 
-                    # ==========================================
-                    # FUZJA SENSORYCZNA Z LIDAREM (Jeśli mamy dane)
-                    # ==========================================
-                    if self.latest_scan is not None:
-                        scan = self.latest_scan
-                        
-                        # Szukamy, który promień lasera odpowiada naszemu kątowi
-                        index_float = (angle_rad - scan.angle_min) / scan.angle_increment
-                        index = int(round(index_float))
+            cv2.putText(bounding_box, f"Angle: {angle_deg:.1f} deg",
+                        (int(x_center) - 50, int(y_center) - 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            detected = True
 
-                        # Bierzemy kilka promieni wokół celu, żeby nie "przestrzelić"
-                        window_size = 5 
-                        valid_distances = []
-                        
-                        min_i = max(0, index - window_size)
-                        max_i = min(len(scan.ranges), index + window_size + 1)
-                        
-                        for i in range(min_i, max_i):
-                            d = scan.ranges[i]
-                            # Ignorujemy błędy i nieskończoność
-                            if not math.isinf(d) and scan.range_min < d < scan.range_max:
-                                valid_distances.append(d)
+        if not detected:
+            self.yolo_angle_rad     = None
+            self.yolo_angle_cam_deg = None
+            self.clear_yolo_markers()
 
-                        if valid_distances:
-                            # Wybieramy najbliższy punkt (to jest nasz człowiek)
-                            distance = min(valid_distances)
-                            
-                            # Trygonometria - wyliczamy X, Y względem robota
-                            target_x = distance * math.cos(angle_rad)
-                            target_y = distance * math.sin(angle_rad)
-                            
-                            self.get_logger().info(f"CEL: Kąt {angle_deg:.1f}st | Dystans: {distance:.2f}m | Współrzędne: X:{target_x:.2f}, Y:{target_y:.2f}")
-                            
-                            # Rysujemy cel w RViz
-                            self.publish_human_marker(target_x, target_y)
+        cv2.imshow("Hexarover AI Vision", bounding_box)
+        cv2.waitKey(1)
 
-                            # Pokazujemy odległość na ekranie YOLO
-                            text_dist = f"Dist: {distance:.2f}m"
-                            cv2.putText(bounding_box, text_dist, (int(x_center) - 50, int(y_center) - 20),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+    # ------------------------------------------------------------------ #
 
-                    # Pokazujemy kąt na ekranie YOLO
-                    text_angle = f"Angle: {angle_deg:.1f} deg"
-                    cv2.putText(bounding_box, text_angle, (int(x_center) - 50, int(y_center) - 50),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+    def find_and_mark_target(self, clusters):
+        half_window = math.radians(SEARCH_WINDOW_DEG)
 
-            # D. Podgląd na żywo
-            cv2.imshow("Hexarover AI Vision", bounding_box)
-            cv2.waitKey(1)
+        best_cluster  = None
+        best_distance = float('inf')
 
-        except Exception as e:
-            self.get_logger().error(f"Błąd przetwarzania klatki: {e}")
+        for cluster in clusters:
+            angle_mean = sum(p[3] for p in cluster) / len(cluster)
+            diff = abs(math.atan2(
+                math.sin(angle_mean - self.yolo_angle_rad),
+                math.cos(angle_mean - self.yolo_angle_rad)
+            ))
+            if diff > half_window:
+                continue
+            dist_min = min(p[2] for p in cluster)
+            if dist_min < best_distance:
+                best_distance = dist_min
+                best_cluster  = cluster
 
-    def publish_human_marker(self, x, y):
-        """Tworzy i wysyła zielony cylinder do RViz2 w miejscu wykrycia człowieka."""
-        marker = Marker()
-        marker.header.frame_id = 'lidar_link' # Znacznik osadzony względem lasera
-        marker.header.stamp = self.get_clock().now().to_msg()
-        marker.ns = 'rescue_target'
-        marker.id = 0
-        marker.type = Marker.CYLINDER
-        marker.action = Marker.ADD
-        
-        # Pozycja wyliczona z fuzji danych
-        marker.pose.position.x = float(x)
-        marker.pose.position.y = float(y)
-        marker.pose.position.z = 0.5 # Wyrównanie w pionie
-        
-        # Skala (Wielkość markera w metrach)
-        marker.scale.x = 0.4
-        marker.scale.y = 0.4
-        marker.scale.z = 1.0
-        
-        # Kolor (Jasnozielony, przezroczysty)
-        marker.color.r = 0.0
-        marker.color.g = 1.0
-        marker.color.b = 0.0
-        marker.color.a = 0.8 
-        
-        # Marker znika automatycznie po 0.5 sekundy, jeśli cel zniknie z kamery
-        marker.lifetime.sec = 0
-        marker.lifetime.nanosec = 500000000 
-        
-        self.marker_pub.publish(marker)
+        if best_cluster is None:
+            return
+
+        cx = sum(p[0] for p in best_cluster) / len(best_cluster)
+        cy = sum(p[1] for p in best_cluster) / len(best_cluster)
+
+        self.get_logger().info(
+            f"CZŁOWIEK | Dist: {best_distance:.2f}m | X:{cx:.2f} Y:{cy:.2f}")
+
+        # ── publikuj kąt i dystans dla follower_node ──────────────────
+        angle_msg      = Float32()
+        angle_msg.data = float(self.yolo_angle_cam_deg)
+        self.angle_pub.publish(angle_msg)
+
+        dist_msg      = Float32()
+        dist_msg.data = float(best_distance)
+        self.dist_pub.publish(dist_msg)
+
+        # ── marker RViz ───────────────────────────────────────────────
+        marker                  = Marker()
+        marker.header.frame_id  = 'laser'
+        marker.header.stamp     = self.get_clock().now().to_msg()
+        marker.ns               = 'human_target'
+        marker.id               = 0
+        marker.type             = Marker.SPHERE
+        marker.action           = Marker.ADD
+        marker.pose.position.x  = cx
+        marker.pose.position.y  = cy
+        marker.pose.position.z  = 0.0
+        marker.scale.x          = 0.3
+        marker.scale.y          = 0.3
+        marker.scale.z          = 0.3
+        marker.color.r          = 1.0
+        marker.color.g          = 0.0
+        marker.color.b          = 0.0
+        marker.color.a          = 1.0
+        marker.lifetime.sec     = 0
+        marker.lifetime.nanosec = 300_000_000
+        self.target_pub.publish(marker)
+
+    # ------------------------------------------------------------------ #
+
+    def publish_yolo_ray(self, angle_rad):
+        marker                  = Marker()
+        marker.header.frame_id  = 'laser'
+        marker.header.stamp     = self.get_clock().now().to_msg()
+        marker.ns               = 'yolo_ray'
+        marker.id               = 0
+        marker.type             = Marker.LINE_LIST
+        marker.action           = Marker.ADD
+        marker.scale.x          = 0.03
+        marker.color.r          = 1.0
+        marker.color.g          = 1.0
+        marker.color.b          = 0.0
+        marker.color.a          = 1.0
+        marker.lifetime.sec     = 0
+        marker.lifetime.nanosec = 300_000_000
+        marker.points.append(Point(x=0.0, y=0.0, z=0.0))
+        marker.points.append(Point(
+            x=RAY_LENGTH_M * math.cos(angle_rad),
+            y=RAY_LENGTH_M * math.sin(angle_rad),
+            z=0.0
+        ))
+        self.ray_pub.publish(marker)
+
+    def publish_search_window(self, angle_rad):
+        half_w = math.radians(SEARCH_WINDOW_DEG)
+        origin = Point(x=0.0, y=0.0, z=0.0)
+        pts    = []
+        pts.append(origin)
+        pts.append(Point(
+            x=RAY_LENGTH_M * math.cos(angle_rad + half_w),
+            y=RAY_LENGTH_M * math.sin(angle_rad + half_w),
+            z=0.0
+        ))
+        for i in range(FOV_ARC_STEPS + 1):
+            a = angle_rad + half_w - i * (2 * half_w / FOV_ARC_STEPS)
+            pts.append(Point(x=RAY_LENGTH_M * math.cos(a), y=RAY_LENGTH_M * math.sin(a), z=0.0))
+        pts.append(origin)
+
+        marker                  = Marker()
+        marker.header.frame_id  = 'laser'
+        marker.header.stamp     = self.get_clock().now().to_msg()
+        marker.ns               = 'yolo_window'
+        marker.id               = 0
+        marker.type             = Marker.LINE_STRIP
+        marker.action           = Marker.ADD
+        marker.scale.x          = 0.02
+        marker.color.r          = 1.0
+        marker.color.g          = 0.5
+        marker.color.b          = 0.0
+        marker.color.a          = 0.5
+        marker.lifetime.sec     = 0
+        marker.lifetime.nanosec = 300_000_000
+        marker.points           = pts
+        self.window_pub.publish(marker)
+
+    def clear_yolo_markers(self):
+        for pub, ns in [(self.ray_pub, 'yolo_ray'), (self.window_pub, 'yolo_window')]:
+            marker                 = Marker()
+            marker.header.frame_id = 'laser'
+            marker.header.stamp    = self.get_clock().now().to_msg()
+            marker.ns              = ns
+            marker.id              = 0
+            marker.action          = Marker.DELETE
+            pub.publish(marker)
+
+    def publish_clusters(self, clusters):
+        marker_array = MarkerArray()
+        for idx, cluster in enumerate(clusters):
+            marker                  = Marker()
+            marker.header.frame_id  = 'laser'
+            marker.header.stamp     = self.get_clock().now().to_msg()
+            marker.ns               = 'clusters'
+            marker.id               = idx
+            marker.type             = Marker.POINTS
+            marker.action           = Marker.ADD
+            marker.scale.x          = 0.08
+            marker.scale.y          = 0.08
+            marker.color.r          = 1.0
+            marker.color.g          = 0.4
+            marker.color.b          = 0.0
+            marker.color.a          = 1.0
+            marker.lifetime.sec     = 0
+            marker.lifetime.nanosec = 200_000_000
+            for p in cluster:
+                marker.points.append(Point(x=p[0], y=p[1], z=0.0))
+            marker_array.markers.append(marker)
+        self.cluster_pub.publish(marker_array)
+
+    def publish_fov_marker(self):
+        half_fov = math.radians(CAMERA_FOV_DEG / 2.0)
+        offset   = self.lidar_offset_rad
+        origin   = Point(x=0.0, y=0.0, z=0.0)
+        pts      = []
+        pts.append(origin)
+        pts.append(Point(
+            x=FOV_LENGTH_M * math.cos(offset + half_fov),
+            y=FOV_LENGTH_M * math.sin(offset + half_fov),
+            z=0.0
+        ))
+        for i in range(FOV_ARC_STEPS + 1):
+            a = offset + half_fov - i * (2 * half_fov / FOV_ARC_STEPS)
+            pts.append(Point(x=FOV_LENGTH_M * math.cos(a), y=FOV_LENGTH_M * math.sin(a), z=0.0))
+        pts.append(origin)
+
+        marker                  = Marker()
+        marker.header.frame_id  = 'laser'
+        marker.header.stamp     = self.get_clock().now().to_msg()
+        marker.ns               = 'camera_fov'
+        marker.id               = 0
+        marker.type             = Marker.LINE_STRIP
+        marker.action           = Marker.ADD
+        marker.scale.x          = 0.02
+        marker.color.r          = 0.2
+        marker.color.g          = 0.6
+        marker.color.b          = 1.0
+        marker.color.a          = 0.7
+        marker.lifetime.sec     = 2
+        marker.lifetime.nanosec = 0
+        marker.points           = pts
+        self.fov_pub.publish(marker)
+
 
 def main(args=None):
     rclpy.init(args=args)
     node = VisionNode()
     rclpy.spin(node)
-    
-    # Sprzątanie przy wyłączaniu
     node.destroy_node()
     rclpy.shutdown()
     cv2.destroyAllWindows()
+
 
 if __name__ == '__main__':
     main()

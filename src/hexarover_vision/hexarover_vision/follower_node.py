@@ -24,7 +24,7 @@ from geometry_msgs.msg import Twist
 from std_msgs.msg import Float32
 
 # ── Odległość podążania ──────────────────────────────────────────────
-DESIRED_DISTANCE_M = 0.5   # robot trzyma się w tej odległości [m]
+DESIRED_DISTANCE_M = 0.75   # robot trzyma się w tej odległości [m]
 
 # ── Limity prędkości ─────────────────────────────────────────────────
 MAX_LINEAR_VEL  = 0.35     # maks prędkość liniowa (silniki Dagu max 0.5!)
@@ -35,9 +35,9 @@ MAX_ANGULAR_VEL = 0.4      # maks prędkość kątowa
 # Kp: większa → ostrzejszy skręt; za duża → oscylacje
 # Ki: kompensuje stały offset; zacznij od 0.0
 # Kd: tłumi oscylacje; zacznij od małej wartości
-KP_ANG = 0.012   # zacznij tu, zwiększaj o 0.002 jeśli reaguje za wolno
+KP_ANG = 0.005   # zacznij tu, zwiększaj o 0.002 jeśli reaguje za wolno
 KI_ANG = 0.0
-KD_ANG = 0.003
+KD_ANG = 0.03
 
 # ── PID liniowy (utrzymanie odległości) ──────────────────────────────
 # error = distance - DESIRED_DISTANCE_M
@@ -73,6 +73,7 @@ class FollowerNode(Node):
         # ostatnie pomiary
         self.last_angle_deg = 0.0
         self.last_distance  = DESIRED_DISTANCE_M
+        self.last_angle_sign = 1.0  # kierunek ostatniego zniknięcia: +1 lewo, -1 prawo
 
         # całki i poprzednie błędy dla PID
         self.integral_ang  = 0.0
@@ -94,6 +95,8 @@ class FollowerNode(Node):
     def angle_callback(self, msg):
         self.last_angle_deg = msg.data
         self.last_data_time = self.get_clock().now()
+        if abs(msg.data) > ANGLE_DEADZONE_DEG:
+            self.last_angle_sign = 1.0 if msg.data > 0 else -1.0
 
     def distance_callback(self, msg):
         self.last_distance  = msg.data
@@ -105,7 +108,10 @@ class FollowerNode(Node):
 
         # ── SAFETY: brak danych → STOP ───────────────────────────────
         if elapsed > SAFETY_TIMEOUT_S:
-            self.publish_stop()
+            cmd = Twist()
+            cmd.linear.x  = 0.0
+            cmd.angular.z = float(self.last_angle_sign * MAX_ANGULAR_VEL * 0.6)
+            self.cmd_pub.publish(cmd)
             self.integral_ang = 0.0
             self.integral_lin = 0.0
             return
@@ -146,7 +152,7 @@ class FollowerNode(Node):
 
         # gdy człowiek za blisko – cofaj, ale nie kręć mocno
         if error_lin < -DIST_DEADZONE_M:
-            linear_x = max(linear_x, -MAX_LINEAR_VEL * 0.5)
+            linear_x = -MAX_LINEAR_VEL * 0.75
 
         # ── CLAMP ────────────────────────────────────────────────────
         linear_x  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear_x))

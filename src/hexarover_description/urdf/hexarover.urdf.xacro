@@ -1,6 +1,32 @@
 <?xml version="1.0"?>
 <robot name="hexarover" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+  <!-- ================= WŁAŚCIWOŚCI (PROPERTIES) ================= -->
+  <!-- 1. WYMIARY GŁÓWNEJ BRYŁY (PODWOZIA) -->
+  <xacro:property name="chassis_length" value="0.38"/>
+  <xacro:property name="chassis_width"  value="0.12"/>
+  <xacro:property name="chassis_height" value="0.07"/>
+  <xacro:property name="chassis_z_offset" value="0.02"/>
+
+  <!-- 2. KOŁA -->
+  <xacro:property name="wheel_radius" value="0.0625"/>
+  <xacro:property name="wheel_length" value="0.06"/>
+  <xacro:property name="wheel_y_offset" value="0.12"/>
+  <xacro:property name="axle_x_offset" value="0.15"/>
+
+  <!-- 3. POZYCJA LIDARU -->
+  <xacro:property name="lidar_x" value="0.15"/>
+  <xacro:property name="lidar_y" value="0.00"/>
+  <xacro:property name="lidar_z" value="0.12"/>
+  <xacro:property name="lidar_yaw" value="0.0"/>
+
+  <!-- 4. POZYCJA IMU -->
+  <xacro:property name="imu_x" value="-0.15"/>
+  <xacro:property name="imu_y" value="0.00"/>
+  <xacro:property name="imu_z" value="0.06"/>  
+  <xacro:property name="imu_yaw" value="0.0"/>
+  <!-- ========================================================== -->
+
   <material name="silver">
     <color rgba="0.8 0.8 0.8 1"/>
   </material>
@@ -11,19 +37,22 @@
     <color rgba="1 0 0 1"/>
   </material>
   <material name="green">
-  <color rgba="0 1 0 1"/>
+    <color rgba="0 1 0 1"/>
   </material>
 
+  <!-- BASE LINK -->
   <link name="base_link">
     <visual>
-      <origin xyz="0 0 0.04" rpy="0 0 0"/> <geometry>
-        <box size="0.45 0.16 0.08"/> </geometry>
+      <origin xyz="0 0 ${chassis_z_offset}" rpy="0 0 0"/> 
+      <geometry>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/> 
+      </geometry>
       <material name="silver"/>
     </visual>
     <collision>
-      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <origin xyz="0 0 ${chassis_z_offset}" rpy="0 0 0"/>
       <geometry>
-        <box size="0.45 0.16 0.08"/>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
       </geometry>
     </collision>
     <inertial>
@@ -32,16 +61,18 @@
     </inertial>
   </link>
 
+  <!-- WHEEL MACRO -->
   <xacro:macro name="wheel" params="prefix side x_pos y_pos friction">
     <link name="${prefix}_${side}_wheel">
       <visual>
         <geometry>
-          <cylinder radius="0.065" length="0.07"/> </geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_length}"/> 
+        </geometry>
         <material name="black"/>
       </visual>
       <collision>
         <geometry>
-          <cylinder radius="0.065" length="0.07"/>
+          <cylinder radius="${wheel_radius}" length="${wheel_length}"/>
         </geometry>
       </collision>
       <inertial>
@@ -62,16 +93,17 @@
     </gazebo>
   </xacro:macro>
 
-  <xacro:wheel prefix="mid" side="left"  x_pos="0"     y_pos="0.13" friction="1.0"/>
-  <xacro:wheel prefix="mid" side="right" x_pos="0"     y_pos="-0.13" friction="1.0"/>
+  <!-- WHEELS INSTANTIATION -->
+  <xacro:wheel prefix="mid" side="left"  x_pos="0" y_pos="${wheel_y_offset}" friction="1.0"/>
+  <xacro:wheel prefix="mid" side="right" x_pos="0" y_pos="-${wheel_y_offset}" friction="1.0"/>
 
-  <xacro:wheel prefix="front" side="left"  x_pos="0.16"  y_pos="0.13" friction="0.2"/>
-  <xacro:wheel prefix="front" side="right" x_pos="0.16"  y_pos="-0.13" friction="0.2"/>
+  <xacro:wheel prefix="front" side="left"  x_pos="${axle_x_offset}"  y_pos="${wheel_y_offset}" friction="0.2"/>
+  <xacro:wheel prefix="front" side="right" x_pos="${axle_x_offset}"  y_pos="-${wheel_y_offset}" friction="0.2"/>
 
-  <xacro:wheel prefix="rear" side="left"  x_pos="-0.16" y_pos="0.13" friction="0.2"/>
-  <xacro:wheel prefix="rear" side="right" x_pos="-0.16" y_pos="-0.13" friction="0.2"/>
+  <xacro:wheel prefix="rear" side="left"  x_pos="-${axle_x_offset}" y_pos="${wheel_y_offset}" friction="0.2"/>
+  <xacro:wheel prefix="rear" side="right" x_pos="-${axle_x_offset}" y_pos="-${wheel_y_offset}" friction="0.2"/>
 
-
+  <!-- LIDAR -->
   <link name="lidar_link">
     <visual>
       <geometry>
@@ -93,10 +125,10 @@
   <joint name="lidar_joint" type="fixed">
     <parent link="base_link"/>
     <child link="lidar_link"/>
-    <origin xyz="0.05 0 0.10" rpy="0 0 0"/> 
+    <origin xyz="${lidar_x} ${lidar_y} ${lidar_z}" rpy="0 0 ${lidar_yaw}"/> 
   </joint>
 
-
+  <!-- IMU -->
   <link name="imu_link">
     <visual>
       <geometry>
@@ -104,7 +136,7 @@
        </geometry>
       <material name="green"/>
     </visual>
-        <collision>
+    <collision>
       <geometry>
         <cylinder radius="0.035" length="0.02"/>
       </geometry>
@@ -118,15 +150,16 @@
   <joint name="imu_joint" type="fixed">
     <parent link="base_link"/>
     <child link="imu_link"/>
-    <origin xyz="0.2 0 0.10" rpy="0 0 0"/> 
-    </joint>
+    <origin xyz="${imu_x} ${imu_y} ${imu_z}" rpy="0 0 ${imu_yaw}"/> 
+  </joint>
 
+  <!-- GAZEBO PLUGINS -->
   <gazebo>
     <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
       <left_joint>mid_left_wheel_joint</left_joint>
       <right_joint>mid_right_wheel_joint</right_joint>
-      <wheel_separation>0.26</wheel_separation>
-      <wheel_radius>0.065</wheel_radius>
+      <wheel_separation>${wheel_y_offset * 2}</wheel_separation>
+      <wheel_radius>${wheel_radius}</wheel_radius>
       <topic>cmd_vel</topic>
       <max_linear_acceleration>2.0</max_linear_acceleration>
 
@@ -143,19 +176,21 @@
     </plugin>
 
     <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
-      <topic>joint_states</topic> <update_rate>30</update_rate>
+      <topic>joint_states</topic> 
+      <update_rate>30</update_rate>
     </plugin>
 
     <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu">
     </plugin>
   </gazebo>
 
+  <!-- GAZEBO SENSORS -->
   <gazebo reference="lidar_link">
     <sensor name="lidar" type="gpu_lidar">
       <pose>0 0 0 0 0 0</pose>
       <always_on>true</always_on>
       <visualize>true</visualize>
-      <update_rate>10</update_rate>
+      <update_rate>5</update_rate>
       <ray>
         <scan>
           <horizontal>
@@ -179,52 +214,34 @@
       <pose>0 0 0 0 0 0</pose>
       <always_on>true</always_on>
       <visualize>true</visualize>
-      <update_rate>10</update_rate>  
+      <update_rate>5</update_rate>  
       <imu>
         <angular_velocity>
           <x>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </x>
           <y>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </y>
           <z>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </z>
         </angular_velocity>
         <linear_acceleration>
           <x>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </x>
           <y>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </y>
           <z>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0</stddev>
-            </noise>
+            <noise type="gaussian"><mean>0.0</mean><stddev>0.0</stddev></noise>
           </z>
         </linear_acceleration>
       </imu>
       <topic>/imu</topic>
       <gz_frame_id>imu_link</gz_frame_id>
-      </sensor>
+    </sensor>
   </gazebo>
 
 </robot>

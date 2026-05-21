@@ -104,7 +104,7 @@ def generate_launch_description():
         output='screen',
         parameters=[scan_matcher_config, {'use_sim_time': True}],
         remappings=[
-            ('/scan', '/scan') # Upewniamy się, że słucha dobrego tematu
+            ('/odom', '/odom_laser')# Upewniamy się, że słucha dobrego tematu
         ]
     )
      # 8. SLAM
@@ -125,28 +125,43 @@ def generate_launch_description():
     nav2_launch_dir = os.path.join(get_package_share_directory('nav2_bringup'), 'launch')
 
     nav2_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(nav2_launch_dir, 'bringup_launch.py')),
+        PythonLaunchDescriptionSource(os.path.join(nav2_launch_dir,'navigation_launch.py')),
         launch_arguments={
             'use_sim_time': 'true',
             'params_file': nav2_params_path,
-            'map': '',         # PUSTA MAPA - to wyłączy map_server
-            'autostart': 'true'
+            # 'map': '',         # PUSTA MAPA - to wyłączy map_server
+            # 'autostart': 'true'
     }.items()
     )
-    delayed_nav2 = TimerAction(
-        period=5.0, # Czekamy 5 sekund
-        actions=[nav2_launch]
+    # delayed_nav2 = TimerAction(
+    #     period=5.0, # Czekamy 5 sekund
+    #     actions=[nav2_launch]
+    # )
+    # 10. ekf - imu
+    ekf_config_path = os.path.join(get_package_share_directory(bringup_pkg_name), 'config', 'ekf.yaml')
+    
+    ekf_node = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_filter_node',
+        output='screen',
+        parameters=[ekf_config_path, {'use_sim_time': True}]
     )
-     
+    # static_tf_node = Node(
+    #         package='tf2_ros',
+    #         executable='static_transform_publisher')
     return LaunchDescription([
         rviz_arg,
         gazebo,
         bridge,
+        ekf_node,
         node_robot_state_publisher,
         spawn_entity,
         rviz_node,
         #rf2o_node,        
         scan_matcher_node,
         slam_toolbox_launch,
-        delayed_nav2
+        #static_tf_node,
+        nav2_launch
+        # delayed_nav2
     ])

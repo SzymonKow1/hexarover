@@ -14,6 +14,7 @@ install(FILES
       #config/rf2o.yaml
       config/scan_matcher.yaml
       config/nav2.yaml
+      config/ekf.yaml
   DESTINATION share/${PROJECT_NAME}/config
 )
 install(

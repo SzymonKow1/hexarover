@@ -1,0 +1,26 @@
+ekf_filter_node:
+  ros__parameters:
+    use_sim_time: true
+    frequency: 30.0
+    two_d_mode: true
+    publish_tf: true       # To EKF zajmie się publikowaniem właściwego TF dla odom -> base_link
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+
+    # Źródło 1: Scan Matcher (ufamy mu głównie jeśli chodzi o x, y i yaw)
+    odom0: /odom_laser
+    odom0_config: [true,  true,  false,
+                   false, false, true,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+
+    # Źródło 2: Prędkości z IMU (kluczowe do zabezpieczenia się przed "rozjeżdżaniem" kątów)
+    imu0: /imu
+    imu0_config: [false, false, false,
+                  false, false, true,  # Orientacja Z (yaw)
+                  false, false, false,
+                  false, false, true,  # Prędkość Z (yaw)
+                  true,  false, false] # Przyspieszenie liniowe X

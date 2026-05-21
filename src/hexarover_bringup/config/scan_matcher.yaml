@@ -9,14 +9,22 @@ laser_scan_matcher:
     laser_frame: "lidar_link"
     
     # Tematy (Topics)
+    # publish_odom: "/odom"
+    # publish_tf: true
     publish_odom: "/odom"
-    publish_tf: true
+    publish_tf: false
 
-    # Parametry dopasowywania skanów (ICP)
-    max_iterations: 5
-    max_correspondence_dist: 0.3
+    # Poprawione parametry dopasowywania
+    max_iterations: 10          # Zwiększ, żeby lepiej dopasowywał
+    max_correspondence_dist: 0.2 # Zwiększ, żeby znajdował pary punktów w szerszym zakresie
     max_angular_correction_deg: 45.0
     max_linear_correction: 0.5
     epsilon_xy: 0.000001
     epsilon_theta: 0.000001
-    outliers_maxPerc: 0.90
+    
+    # KLUCZOWA ZMIANA:
+    outliers_maxPerc: 0.80      # Zmień z 0.90 na 0.20 (odrzucaj tylko 20% punktów)
+    
+    # Dodaj to dla lepszej stabilności:
+    use_alpha_beta: true
+    sigma: 0.01

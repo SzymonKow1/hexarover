@@ -50,7 +50,7 @@ KD_LIN = 0.05
 
 # ── Strefa martwa ────────────────────────────────────────────────────
 # poniżej tego kąta/dystansu – nie kręć/nie jedź (eliminuje drgania)
-ANGLE_DEADZONE_DEG  = 3.0   # stopnie
+ANGLE_DEADZONE_DEG  = 5.0   # stopnie
 DIST_DEADZONE_M     = 0.08  # metry
 
 # ── Timeout bezpieczeństwa ───────────────────────────────────────────

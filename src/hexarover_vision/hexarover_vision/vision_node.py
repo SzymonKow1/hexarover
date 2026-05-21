@@ -18,6 +18,12 @@ CLUSTER_DIST_M    = 0.3
 SEARCH_WINDOW_DEG = 8.0
 RAY_LENGTH_M      = 3.0
 
+# ── Tracker ──────────────────────────────────────────────────────────
+# YOLO odpala co N klatek, między nimi CSRT śledzi bbox
+# Zwiększ jeśli CPU za mocno obciążone, zmniejsz jeśli tracker za często gubi
+YOLO_EVERY_N_FRAMES = 5
+# ─────────────────────────────────────────────────────────────────────
+
 
 def calculate_angle(x_center, image_width, fov):
     return ((image_width / 2.0) - x_center) * (fov / image_width)
@@ -41,12 +47,16 @@ class VisionNode(Node):
         self.angle_pub   = self.create_publisher(Float32,     '/human_angle',      10)
         self.dist_pub    = self.create_publisher(Float32,     '/human_distance',   10)
 
-        self.lidar_offset_rad  = math.radians(LIDAR_OFFSET_DEG)
-        self.yolo_angle_rad    = None
-        self.yolo_angle_cam_deg = None  # kąt w układzie kamery [stopnie]
+        self.lidar_offset_rad   = math.radians(LIDAR_OFFSET_DEG)
+        self.yolo_angle_rad     = None
+        self.yolo_angle_cam_deg = None
+
+        # tracker
+        self.tracker         = None   # instancja CSRT
+        self.tracker_ok      = False  # czy tracker aktywny i działa
+        self.frame_count     = 0      # licznik klatek
 
         self.create_timer(1.0, self.publish_fov_marker)
-
         self.get_logger().info("Węzeł gotowy!")
 
     # ------------------------------------------------------------------ #
@@ -84,14 +94,56 @@ class VisionNode(Node):
         frame = cv2.resize(frame, (800, 600))
         image_width = frame.shape[1]
 
-        results = self.model(frame, classes=[0], max_det=1, verbose=False, conf=0.6)
-        bounding_box = results[0].plot()
+        self.frame_count += 1
+        run_yolo = (self.frame_count % YOLO_EVERY_N_FRAMES == 0)
 
-        detected = False
-        for r in results:
-            if len(r.boxes) == 0:
-                continue
-            x_center, y_center, _, _ = r.boxes[0].xywh[0].tolist()
+        x_center = None
+        y_center = None
+        display  = frame.copy()
+
+        # ── YOLO co N klatek ─────────────────────────────────────────
+        if run_yolo:
+            results = self.model(frame, classes=[0], max_det=1, verbose=False, conf=0.6)
+            display = results[0].plot()
+
+            for r in results:
+                if len(r.boxes) == 0:
+                    # YOLO nie widzi – reset trackera
+                    self.tracker_ok = False
+                    continue
+
+                x1, y1, x2, y2 = r.boxes[0].xyxy[0].tolist()
+                x_center = (x1 + x2) / 2.0
+                y_center = (y1 + y2) / 2.0
+
+                # reinicjalizuj tracker nowym bboxem z YOLO
+                bbox = (int(x1), int(y1), int(x2 - x1), int(y2 - y1))
+                self.tracker    = cv2.legacy.TrackerCSRT_create()
+                self.tracker_ok = self.tracker.init(frame, bbox)
+
+                cv2.putText(display, "YOLO",
+                            (int(x1), int(y1) - 25),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
+        # ── Tracker między klatkami YOLO ─────────────────────────────
+        elif self.tracker_ok and self.tracker is not None:
+            ok, bbox = self.tracker.update(frame)
+            if ok:
+                tx, ty, tw, th = [int(v) for v in bbox]
+                x_center = tx + tw / 2.0
+                y_center = ty + th / 2.0
+
+                # rysuj bbox trackera (inny kolor niż YOLO)
+                cv2.rectangle(display, (tx, ty), (tx + tw, ty + th), (255, 100, 0), 2)
+                cv2.putText(display, "TRACKER",
+                            (tx, ty - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 100, 0), 2)
+            else:
+                # tracker zgubił obiekt
+                self.tracker_ok = False
+
+        # ── Oblicz kąt z aktualnej pozycji (YOLO lub tracker) ────────
+        if x_center is not None:
             angle_deg = calculate_angle(x_center, image_width, CAMERA_FOV_DEG)
 
             angle_cam_rad   = math.radians(angle_deg)
@@ -105,17 +157,15 @@ class VisionNode(Node):
             self.publish_yolo_ray(angle_laser_rad)
             self.publish_search_window(angle_laser_rad)
 
-            cv2.putText(bounding_box, f"Angle: {angle_deg:.1f} deg",
+            cv2.putText(display, f"Angle: {angle_deg:.1f} deg",
                         (int(x_center) - 50, int(y_center) - 50),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            detected = True
-
-        if not detected:
+        else:
             self.yolo_angle_rad     = None
             self.yolo_angle_cam_deg = None
             self.clear_yolo_markers()
 
-        cv2.imshow("Hexarover AI Vision", bounding_box)
+        cv2.imshow("Hexarover AI Vision", display)
         cv2.waitKey(1)
 
     # ------------------------------------------------------------------ #
@@ -148,7 +198,6 @@ class VisionNode(Node):
         self.get_logger().info(
             f"CZŁOWIEK | Dist: {best_distance:.2f}m | X:{cx:.2f} Y:{cy:.2f}")
 
-        # ── publikuj kąt i dystans dla follower_node ──────────────────
         angle_msg      = Float32()
         angle_msg.data = float(self.yolo_angle_cam_deg)
         self.angle_pub.publish(angle_msg)
@@ -157,7 +206,6 @@ class VisionNode(Node):
         dist_msg.data = float(best_distance)
         self.dist_pub.publish(dist_msg)
 
-        # ── marker RViz ───────────────────────────────────────────────
         marker                  = Marker()
         marker.header.frame_id  = 'laser'
         marker.header.stamp     = self.get_clock().now().to_msg()

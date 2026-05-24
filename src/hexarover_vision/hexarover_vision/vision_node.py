@@ -1,6 +1,7 @@
 import rclpy
 import math
 import cv2
+import numpy as np
 from rclpy.node import Node
 
 from sensor_msgs.msg import LaserScan, Image
@@ -36,7 +37,7 @@ class VisionNode(Node):
         self.bridge = CvBridge()
         self.model  = YOLO("yolov8n.pt")
 
-        # Ustawienie queue_size na 1, aby system nie trzymał starych ramek w pamięci
+        # Subskrypcja z queue_size = 1 w celu uniknięcia opóźnień przetwarzania klatek
         self.scan_sub  = self.create_subscription(LaserScan, '/scan',      self.scan_callback,  1)
         self.image_sub = self.create_subscription(Image,     '/image_raw', self.image_callback, 1)
 
@@ -59,12 +60,15 @@ class VisionNode(Node):
         self.latest_scan_stamp = None
         self.last_scan_time = self.get_clock().now()
         
-        # ZAMEK DO ELIMINACJI OPÓŹNIEŃ (Lag Killer)
+        # Blokada wielowątkowa przetwarzania obrazu
         self.is_processing_frame = False
-        self.debug_mode = True  # Ustaw na False, żeby przyspieszyć działanie bez wyświetlania okna
+
+        # Deklaracja parametru debugowania w standardzie ROS 2
+        self.declare_parameter('debug_mode', True)
+        self.debug_mode = self.get_parameter('debug_mode').get_parameter_value().bool_value
 
         self.create_timer(1.0, self.publish_fov_marker)
-        self.get_logger().info("Węzeł Vision (LAG KILLER + Marker Fixed) gotowy!")
+        self.get_logger().info("Węzeł Vision (Wektorowy Lidar + ROS Params) gotowy!")
 
     def scan_callback(self, msg):
         now = self.get_clock().now()
@@ -72,35 +76,33 @@ class VisionNode(Node):
             return 
         self.last_scan_time = now
 
-        points = []
-        for i, d in enumerate(msg.ranges):
-            if math.isinf(d) or math.isnan(d):
-                continue
-            if not (msg.range_min < d < msg.range_max):
-                continue
-            a = msg.angle_min + i * msg.angle_increment
-            points.append((d * math.cos(a), d * math.sin(a), d, a))
+        # OPTYMALIZACJA: Wektorowa konwersja do NumPy zamiast wolnych pętli Python
+        ranges = np.array(msg.ranges)
+        angles = msg.angle_min + np.arange(len(ranges)) * msg.angle_increment
 
-        if not points:
+        valid_mask = np.isfinite(ranges) & (ranges > msg.range_min) & (ranges < msg.range_max)
+        if not np.any(valid_mask):
             self.latest_clusters = []
             return
 
-        clusters = []
-        current  = [points[0]]
-        for prev, curr in zip(points, points[1:]):
-            if math.hypot(curr[0] - prev[0], curr[1] - prev[1]) > CLUSTER_DIST_M:
-                clusters.append(current)
-                current = [curr]
-            else:
-                current.append(curr)
-        clusters.append(current)
+        valid_ranges = ranges[valid_mask]
+        valid_angles = angles[valid_mask]
 
-        self.latest_clusters = clusters
+        # Konwersja na współrzędne kartezjańskie
+        xs = valid_ranges * np.cos(valid_angles)
+        ys = valid_ranges * np.sin(valid_angles)
+
+        # Tworzymy tablicę punktów [x, y, range, angle]
+        pts = np.stack([xs, ys, valid_ranges, valid_angles], axis=1)
+
+        # Szybkie klastrowanie przy użyciu różnic odległości euklidesowych sąsiadów
+        dists = np.hypot(np.diff(pts[:, 0]), np.diff(pts[:, 1]))
+        split_indices = np.where(dists > CLUSTER_DIST_M)[0] + 1
+        
+        self.latest_clusters = np.split(pts, split_indices)
         self.latest_scan_stamp = msg.header.stamp
 
     def image_callback(self, msg):
-        # LAG KILLER: Jeśli już przetwarzamy inną klatkę, porzuć tę. 
-        # Zawsze bierzemy absolutnie najnowszą z wierzchu!
         if self.is_processing_frame:
             return
         
@@ -116,7 +118,6 @@ class VisionNode(Node):
                 verbose=False, conf=0.5, persist=True
             )
             
-            # Generowanie obrysu wyników na matrycy tylko w trybie debugowania
             if self.debug_mode:
                 display = results[0].plot()
 
@@ -145,7 +146,6 @@ class VisionNode(Node):
                 if self.latest_clusters and self.latest_scan_stamp:
                     self.find_and_mark_target(self.latest_clusters, self.latest_scan_stamp)
 
-                # Nanoszenie tekstu na klatkę wideo tylko w trybie debugowania
                 if self.debug_mode:
                     cv2.putText(display, f"Angle: {angle_deg:.1f} deg",
                                 (int(x_center) - 50, int(y_center) - 50),
@@ -155,13 +155,11 @@ class VisionNode(Node):
                 self.yolo_angle_cam_deg = None
                 self.clear_yolo_markers()
 
-            # Wyświetlanie okna OpenCV tylko w trybie debugowania
             if self.debug_mode:
                 cv2.imshow("Hexarover AI Vision", display)
                 cv2.waitKey(1)
             
         finally:
-            # Zwalniamy zamek, jesteśmy gotowi na nowiutką klatkę!
             self.is_processing_frame = False
 
     def find_and_mark_target(self, clusters, scan_stamp):
@@ -169,18 +167,18 @@ class VisionNode(Node):
 
         candidates = []
         for cluster in clusters:
-            angle_mean = sum(p[3] for p in cluster) / len(cluster)
+            # cluster jest teraz wycinkiem tablicy NumPy [x, y, range, angle]
+            angle_mean = np.mean(cluster[:, 3])
             diff = abs(math.atan2(
                 math.sin(angle_mean - self.yolo_angle_rad),
                 math.cos(angle_mean - self.yolo_angle_rad)
             ))
             if diff > half_window:
                 continue
-            dist_min = min(p[2] for p in cluster)
+            dist_min = np.min(cluster[:, 2])
             candidates.append((dist_min, cluster))
 
         if not candidates:
-            #self.get_logger().warn("Okluzja! YOLO widzi, Lidar nie. Używam YOLO i starego dystansu.")
             self.smooth_angle = EMA_ALPHA * self.yolo_angle_cam_deg + (1 - EMA_ALPHA) * self.smooth_angle
             
             angle_msg = Float32()
@@ -197,10 +195,10 @@ class VisionNode(Node):
         if len(candidates) >= 2:
             c1 = candidates[0][1]
             c2 = candidates[1][1]
-            cx1 = sum(p[0] for p in c1) / len(c1)
-            cy1 = sum(p[1] for p in c1) / len(c1)
-            cx2 = sum(p[0] for p in c2) / len(c2)
-            cy2 = sum(p[1] for p in c2) / len(c2)
+            cx1 = np.mean(c1[:, 0])
+            cy1 = np.mean(c1[:, 1])
+            cx2 = np.mean(c2[:, 0])
+            cy2 = np.mean(c2[:, 1])
             dist_between = math.hypot(cx2 - cx1, cy2 - cy1)
 
             if dist_between <= 0.6:

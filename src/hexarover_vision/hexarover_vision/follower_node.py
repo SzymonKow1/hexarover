@@ -29,11 +29,11 @@ MAX_LINEAR_VEL  = 0.5
 MAX_ANGULAR_VEL = 1.2
 
 # Strojenie PID
-KP_ANG = 0.015   
+KP_ANG = 0.15   
 KI_ANG = 0.0
-KD_ANG = 0.05
+KD_ANG = 0.04
 
-KP_LIN = 0.5     
+KP_LIN = 0.7     
 KI_LIN = 0.0
 KD_LIN = 0.08
 
@@ -81,6 +81,7 @@ class FollowerNode(Node):
         self.obstacle_ahead = False
         self.state = 'IDLE'
         self.current_goal_handle = None
+        self.nav2_failed_time = None
 
         self.integral_ang   = 0.0
         self.integral_lin   = 0.0
@@ -177,6 +178,13 @@ class FollowerNode(Node):
         # 0. Zabezpieczenie dla pracującego Nav2
         if self.state == 'NAV2_AVOID':
             return
+        
+        if self.nav2_failed_time is not None:
+            elapsed = (now - self.nav2_failed_time).nanoseconds / 1e9
+            if elapsed < 0.5:
+                self.send_zero_vel()
+                return
+            self.nav2_failed_time = None
 
         # =================================================================
         # 1. ZGUBIONY I DOJECHAŁ NA MIEJSCE -> BLOKADA LASERA I TYLKO KRĘCENIE
@@ -348,6 +356,7 @@ class FollowerNode(Node):
     def get_result_callback(self, future):
         self.current_goal_handle = None
         self.state = 'IDLE'
+        self.nav2_failed_time = self.get_clock().now()
 
     def cancel_current_goal(self):
         if self.current_goal_handle is not None:

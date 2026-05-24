@@ -9,6 +9,7 @@ from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
+import numpy as np
 
 # ======================================================
 # PARAMETRY BEZPIECZEŃSTWA
@@ -89,7 +90,7 @@ class FollowerNode(Node):
         self.prev_error_lin = 0.0
         self.last_pid_time  = self.get_clock().now()
 
-        self.timer = self.create_timer(0.05, self.decision_loop)
+        self.timer = self.create_timer(0.1, self.decision_loop)
         self.get_logger().info("Follower Node V20 (Precyzyjny Odom + Żelazne Kręcenie) gotowy!")
 
     def odom_callback(self, msg):
@@ -134,26 +135,49 @@ class FollowerNode(Node):
             hx_base = dx * math.cos(-self.robot_yaw) - dy * math.sin(-self.robot_yaw)
             hy_base = dx * math.sin(-self.robot_yaw) + dy * math.cos(-self.robot_yaw)
 
-        min_dist = float('inf')
+        # 1. Konwersja surowych danych do tablicy Numpy
+        ranges = np.array(msg.ranges)
+        
+        # 2. Wygenerowanie tablicy wszystkich kątów
+        angles = msg.angle_min + np.arange(len(ranges)) * msg.angle_increment
+        angles = (angles + np.pi) % (2 * np.pi) - np.pi 
+        
+        # 3. Maski filtrujące błędne odczyty oraz zakres stożka widzenia
+        valid_mask = np.isfinite(ranges) & (ranges >= msg.range_min) & (ranges <= msg.range_max)
         cone_rad = math.radians(CONE_ANGLE_DEG)
+        cone_mask = np.abs(angles) < cone_rad
+        
+        # Złożenie masek: interesują nas tylko poprawne punkty wewnątrz stożka (Region of Interest)
+        roi_mask = valid_mask & cone_mask
+        
+        roi_ranges = ranges[roi_mask]
+        roi_angles = angles[roi_mask]
+        
+        # Zabezpieczenie przed pustą tablicą (np. gdy laser patrzy w pustą przestrzeń)
+        if len(roi_ranges) == 0:
+            self.obstacle_ahead = False
+            return
 
-        for i, d in enumerate(msg.ranges):
-            if math.isinf(d) or math.isnan(d) or d < msg.range_min or d > msg.range_max:
-                continue
+        # 4. Eliminacja punktów należących do człowieka
+        if human_recently_seen:
+            # Obliczenie współrzędnych kartezjańskich dla wszystkich punktów w stożku naraz
+            px = roi_ranges * np.cos(roi_angles)
+            py = roi_ranges * np.sin(roi_angles)
             
-            angle = msg.angle_min + i * msg.angle_increment
-            angle = (angle + math.pi) % (2 * math.pi) - math.pi 
+            # Obliczenie odległości tych punktów od środka bazy człowieka
+            dist_to_human = np.hypot(px - hx_base, py - hy_base)
             
-            if abs(angle) < cone_rad:
-                is_human = False
-                if human_recently_seen:
-                    px = d * math.cos(angle)
-                    py = d * math.sin(angle)
-                    if math.hypot(px - hx_base, py - hy_base) < 0.7:
-                        is_human = True
-                
-                if not is_human and d < min_dist:
-                    min_dist = d
+            # Maska wykluczająca człowieka (zostawiamy punkty oddalone o więcej niż 0.7m od celu)
+            obstacle_mask = dist_to_human >= 0.7
+            obstacle_ranges = roi_ranges[obstacle_mask]
+        else:
+            obstacle_ranges = roi_ranges
+
+        # 5. Szukanie najbliższej przeszkody
+        if len(obstacle_ranges) > 0:
+            min_dist = np.min(obstacle_ranges)
+        else:
+            min_dist = float('inf')
         
         self.obstacle_ahead = min_dist < OBSTACLE_AVOID_DIST
 

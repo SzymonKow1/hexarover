@@ -61,6 +61,7 @@ class VisionNode(Node):
         
         # ZAMEK DO ELIMINACJI OPÓŹNIEŃ (Lag Killer)
         self.is_processing_frame = False
+        self.debug_mode = True  # Ustaw na False, żeby przyspieszyć działanie bez wyświetlania okna
 
         self.create_timer(1.0, self.publish_fov_marker)
         self.get_logger().info("Węzeł Vision (LAG KILLER + Marker Fixed) gotowy!")
@@ -114,7 +115,10 @@ class VisionNode(Node):
                 frame, classes=[0], max_det=1,
                 verbose=False, conf=0.5, persist=True
             )
-            display = results[0].plot()
+            
+            # Generowanie obrysu wyników na matrycy tylko w trybie debugowania
+            if self.debug_mode:
+                display = results[0].plot()
 
             x_center = None
             y_center = None
@@ -141,16 +145,20 @@ class VisionNode(Node):
                 if self.latest_clusters and self.latest_scan_stamp:
                     self.find_and_mark_target(self.latest_clusters, self.latest_scan_stamp)
 
-                cv2.putText(display, f"Angle: {angle_deg:.1f} deg",
-                            (int(x_center) - 50, int(y_center) - 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                # Nanoszenie tekstu na klatkę wideo tylko w trybie debugowania
+                if self.debug_mode:
+                    cv2.putText(display, f"Angle: {angle_deg:.1f} deg",
+                                (int(x_center) - 50, int(y_center) - 50),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             else:
                 self.yolo_angle_rad     = None
                 self.yolo_angle_cam_deg = None
                 self.clear_yolo_markers()
 
-            cv2.imshow("Hexarover AI Vision", display)
-            cv2.waitKey(1)
+            # Wyświetlanie okna OpenCV tylko w trybie debugowania
+            if self.debug_mode:
+                cv2.imshow("Hexarover AI Vision", display)
+                cv2.waitKey(1)
             
         finally:
             # Zwalniamy zamek, jesteśmy gotowi na nowiutką klatkę!

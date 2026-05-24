@@ -10,9 +10,6 @@ from std_msgs.msg import Float32
 from cv_bridge import CvBridge
 from ultralytics import YOLO
 
-# ======================================================
-# PARAMETRY KAMERY I LASERA
-# ======================================================
 CAMERA_FOV_DEG    = 77.0
 LIDAR_OFFSET_DEG  = 0.0
 FOV_LENGTH_M      = 3.0
@@ -21,8 +18,6 @@ CLUSTER_DIST_M    = 0.3
 SEARCH_WINDOW_DEG = 12.0
 RAY_LENGTH_M      = 3.0
 EMA_ALPHA         = 0.7
-
-THROTTLE_SCAN_SEC = 0.1  
 
 
 def calculate_angle(x_center, image_width, fov):
@@ -36,9 +31,8 @@ class VisionNode(Node):
         self.bridge = CvBridge()
         self.model  = YOLO("yolov8n.pt")
 
-        # Ustawienie queue_size na 1, aby system nie trzymał starych ramek w pamięci
-        self.scan_sub  = self.create_subscription(LaserScan, '/scan',      self.scan_callback,  1)
-        self.image_sub = self.create_subscription(Image,     '/image_raw', self.image_callback, 1)
+        self.scan_sub  = self.create_subscription(LaserScan, '/scan',      self.scan_callback,  10)
+        self.image_sub = self.create_subscription(Image,     '/image_raw', self.image_callback, 10)
 
         self.fov_pub     = self.create_publisher(Marker,      '/camera_fov',      10)
         self.cluster_pub = self.create_publisher(MarkerArray, '/lidar_clusters',   10)
@@ -55,22 +49,12 @@ class VisionNode(Node):
         self.smooth_angle = 0.0
         self.smooth_dist  = 0.0
 
-        self.latest_clusters = []
-        self.latest_scan_stamp = None
-        self.last_scan_time = self.get_clock().now()
-        
-        # ZAMEK DO ELIMINACJI OPÓŹNIEŃ (Lag Killer)
-        self.is_processing_frame = False
-
         self.create_timer(1.0, self.publish_fov_marker)
-        self.get_logger().info("Węzeł Vision (LAG KILLER + Marker Fixed) gotowy!")
+        self.get_logger().info("Węzeł gotowy!")
+
+    # ------------------------------------------------------------------ #
 
     def scan_callback(self, msg):
-        now = self.get_clock().now()
-        if (now - self.last_scan_time).nanoseconds / 1e9 < THROTTLE_SCAN_SEC:
-            return 
-        self.last_scan_time = now
-
         points = []
         for i, d in enumerate(msg.ranges):
             if math.isinf(d) or math.isnan(d):
@@ -81,7 +65,6 @@ class VisionNode(Node):
             points.append((d * math.cos(a), d * math.sin(a), d, a))
 
         if not points:
-            self.latest_clusters = []
             return
 
         clusters = []
@@ -94,67 +77,65 @@ class VisionNode(Node):
                 current.append(curr)
         clusters.append(current)
 
-        self.latest_clusters = clusters
-        self.latest_scan_stamp = msg.header.stamp
+        # self.publish_clusters(clusters)
+
+        # if self.yolo_angle_rad is not None:
+        #     self.find_and_mark_target(clusters, scan_stamp)
+        # PRZEKAZUJEMY ZNACZNIK CZASU Z SKANU
+        self.publish_clusters(clusters, msg.header.stamp)
+
+        if self.yolo_angle_rad is not None:
+            # PRZEKAZUJEMY ZNACZNIK CZASU Z SKANU
+            self.find_and_mark_target(clusters, msg.header.stamp)
 
     def image_callback(self, msg):
-        # LAG KILLER: Jeśli już przetwarzamy inną klatkę, porzuć tę. 
-        # Zawsze bierzemy absolutnie najnowszą z wierzchu!
-        if self.is_processing_frame:
-            return
-        
-        self.is_processing_frame = True
-        
-        try:
-            frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-            frame = cv2.resize(frame, (320, 320))
-            image_width = frame.shape[1]
+        frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+        frame = cv2.resize(frame, (800, 600))
+        image_width = frame.shape[1]
 
-            results = self.model.track(
-                frame, classes=[0], max_det=1,
-                verbose=False, conf=0.5, persist=True
+        results = self.model.track(
+            frame, classes=[0], max_det=1,
+            verbose=False, conf=0.5, persist=True
+        )
+        display = results[0].plot()
+
+        x_center = None
+        y_center = None
+
+        for r in results:
+            if len(r.boxes) == 0:
+                continue
+            x_center, y_center, _, _ = r.boxes[0].xywh[0].tolist()
+
+        if x_center is not None:
+            angle_deg = calculate_angle(x_center, image_width, CAMERA_FOV_DEG)
+
+            angle_cam_rad   = math.radians(angle_deg)
+            angle_laser_rad = math.atan2(
+                math.sin(angle_cam_rad + self.lidar_offset_rad),
+                math.cos(angle_cam_rad + self.lidar_offset_rad)
             )
-            display = results[0].plot()
+            self.yolo_angle_rad     = angle_laser_rad
+            self.yolo_angle_cam_deg = angle_deg
 
-            x_center = None
-            y_center = None
+            # self.publish_yolo_ray(angle_laser_rad)
+            # self.publish_search_window(angle_laser_rad)
+            # Przekazujemy również czas do promieni YOLO
+            self.publish_yolo_ray(angle_laser_rad, msg.header.stamp)
+            self.publish_search_window(angle_laser_rad, msg.header.stamp)
 
-            for r in results:
-                if len(r.boxes) == 0:
-                    continue
-                x_center, y_center, _, _ = r.boxes[0].xywh[0].tolist()
+            cv2.putText(display, f"Angle: {angle_deg:.1f} deg",
+                        (int(x_center) - 50, int(y_center) - 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+        else:
+            self.yolo_angle_rad     = None
+            self.yolo_angle_cam_deg = None
+            self.clear_yolo_markers()
 
-            if x_center is not None:
-                angle_deg = calculate_angle(x_center, image_width, CAMERA_FOV_DEG)
+        cv2.imshow("Hexarover AI Vision", display)
+        cv2.waitKey(1)
 
-                angle_cam_rad   = math.radians(angle_deg)
-                angle_laser_rad = math.atan2(
-                    math.sin(angle_cam_rad + self.lidar_offset_rad),
-                    math.cos(angle_cam_rad + self.lidar_offset_rad)
-                )
-                self.yolo_angle_rad     = angle_laser_rad
-                self.yolo_angle_cam_deg = angle_deg
-
-                self.publish_yolo_ray(angle_laser_rad, msg.header.stamp)
-                self.publish_search_window(angle_laser_rad, msg.header.stamp)
-
-                if self.latest_clusters and self.latest_scan_stamp:
-                    self.find_and_mark_target(self.latest_clusters, self.latest_scan_stamp)
-
-                cv2.putText(display, f"Angle: {angle_deg:.1f} deg",
-                            (int(x_center) - 50, int(y_center) - 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-            else:
-                self.yolo_angle_rad     = None
-                self.yolo_angle_cam_deg = None
-                self.clear_yolo_markers()
-
-            cv2.imshow("Hexarover AI Vision", display)
-            cv2.waitKey(1)
-            
-        finally:
-            # Zwalniamy zamek, jesteśmy gotowi na nowiutką klatkę!
-            self.is_processing_frame = False
+    # ------------------------------------------------------------------ #
 
     def find_and_mark_target(self, clusters, scan_stamp):
         half_window = math.radians(SEARCH_WINDOW_DEG)
@@ -172,17 +153,7 @@ class VisionNode(Node):
             candidates.append((dist_min, cluster))
 
         if not candidates:
-            #self.get_logger().warn("Okluzja! YOLO widzi, Lidar nie. Używam YOLO i starego dystansu.")
-            self.smooth_angle = EMA_ALPHA * self.yolo_angle_cam_deg + (1 - EMA_ALPHA) * self.smooth_angle
-            
-            angle_msg = Float32()
-            angle_msg.data = float(self.smooth_angle)
-            self.angle_pub.publish(angle_msg)
-
-            dist_msg = Float32()
-            dist_msg.data = float(self.smooth_dist) 
-            self.dist_pub.publish(dist_msg)
-            return  
+            return
 
         candidates.sort(key=lambda c: c[0])
 
@@ -202,15 +173,23 @@ class VisionNode(Node):
         else:
             top = candidates[:1]
 
+        all_points    = [p for _, cluster in top for p in cluster]
+        cx            = sum(p[0] for p in all_points) / len(all_points)
+        cy            = sum(p[1] for p in all_points) / len(all_points)
         best_distance = min(c[0] for c in top)
 
+        # ─── NAPRAWA FILTRA EMA ──────────────────────────────────────
+        # Jeśli to pierwsze wykrycie (wartość to 0.0), przejmij od razu prawdziwą wartość
         if self.smooth_dist == 0.0:
             self.smooth_angle = self.yolo_angle_cam_deg
             self.smooth_dist  = best_distance
         else:
             self.smooth_angle = EMA_ALPHA * self.yolo_angle_cam_deg + (1 - EMA_ALPHA) * self.smooth_angle
             self.smooth_dist  = EMA_ALPHA * best_distance           + (1 - EMA_ALPHA) * self.smooth_dist
-            
+        # ─────────────────────────────────────────────────────────────
+        self.get_logger().info(
+            f"CZŁOWIEK | Dist: {self.smooth_dist:.2f}m | X:{cx:.2f} Y:{cy:.2f}")
+
         angle_msg      = Float32()
         angle_msg.data = float(self.smooth_angle)
         self.angle_pub.publish(angle_msg)
@@ -219,9 +198,6 @@ class VisionNode(Node):
         dist_msg.data = float(self.smooth_dist)
         self.dist_pub.publish(dist_msg)
 
-        marker_x = self.smooth_dist * math.cos(self.yolo_angle_rad)
-        marker_y = self.smooth_dist * math.sin(self.yolo_angle_rad)
-
         marker                  = Marker()
         marker.header.frame_id  = 'base_link'
         marker.header.stamp     = scan_stamp
@@ -229,8 +205,8 @@ class VisionNode(Node):
         marker.id               = 0
         marker.type             = Marker.SPHERE
         marker.action           = Marker.ADD
-        marker.pose.position.x  = marker_x
-        marker.pose.position.y  = marker_y
+        marker.pose.position.x  = cx
+        marker.pose.position.y  = cy
         marker.pose.position.z  = 0.0
         marker.scale.x          = 0.3
         marker.scale.y          = 0.3
@@ -242,6 +218,8 @@ class VisionNode(Node):
         marker.lifetime.sec     = 0
         marker.lifetime.nanosec = 300_000_000
         self.target_pub.publish(marker)
+
+    # ------------------------------------------------------------------ #
 
     def publish_yolo_ray(self, angle_rad, msg_stamp):
         marker                  = Marker()
@@ -308,6 +286,29 @@ class VisionNode(Node):
             marker.action          = Marker.DELETE
             pub.publish(marker)
 
+    def publish_clusters(self, clusters, scan_stamp):
+        marker_array = MarkerArray()
+        for idx, cluster in enumerate(clusters):
+            marker                  = Marker()
+            marker.header.frame_id  = 'base_link'
+            marker.header.stamp     = scan_stamp
+            marker.ns               = 'clusters'
+            marker.id               = idx
+            marker.type             = Marker.POINTS
+            marker.action           = Marker.ADD
+            marker.scale.x          = 0.08
+            marker.scale.y          = 0.08
+            marker.color.r          = 1.0
+            marker.color.g          = 0.4
+            marker.color.b          = 0.0
+            marker.color.a          = 1.0
+            marker.lifetime.sec     = 0
+            marker.lifetime.nanosec = 200_000_000
+            for p in cluster:
+                marker.points.append(Point(x=p[0], y=p[1], z=0.0))
+            marker_array.markers.append(marker)
+        self.cluster_pub.publish(marker_array)
+
     def publish_fov_marker(self):
         half_fov = math.radians(CAMERA_FOV_DEG / 2.0)
         offset   = self.lidar_offset_rad
@@ -349,6 +350,7 @@ def main(args=None):
     node.destroy_node()
     rclpy.shutdown()
     cv2.destroyAllWindows()
+
 
 if __name__ == '__main__':
     main()

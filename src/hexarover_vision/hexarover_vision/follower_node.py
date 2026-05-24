@@ -2,15 +2,42 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 import math
+from collections import deque
 
 from std_msgs.msg import Float32
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
+from sensor_msgs.msg import LaserScan
+from nav_msgs.msg import Odometry
 
-ROBOT_FRONT_OFFSET = 0.5  # Zmień to na rzeczywistą odległość od środka do przodu zderzaka z URDF
-STOP_DIST = 1.0  # Zatrzymaj się 1 metr od człowieka
-TOTAL_STOP_DIST = STOP_DIST + ROBOT_FRONT_OFFSET
-MAX_DIST= 10.0   # Ignoruj cele dalej niż 5 metrów (błędy lasera)
+# ======================================================
+# PARAMETRY BEZPIECZEŃSTWA
+# ======================================================
+OBSTACLE_AVOID_DIST = 0.8       
+CONE_ANGLE_DEG      = 20.0       
+CMD_VEL_TIMEOUT     = 0.5       
+SEARCH_ANGULAR_VEL  = 0.4       
+
+# ======================================================
+# PARAMETRY PID I JAZDY (CMD_VEL)
+# ======================================================
+DESIRED_DISTANCE_M  = 1.0       
+DIST_DEADZONE_M     = 0.15      
+ANGLE_DEADZONE_DEG  = 4.0       
+
+MAX_LINEAR_VEL  = 0.5           
+MAX_ANGULAR_VEL = 1.2
+
+# Strojenie PID
+KP_ANG = 0.015   
+KI_ANG = 0.0
+KD_ANG = 0.05
+
+KP_LIN = 0.5     
+KI_LIN = 0.0
+KD_LIN = 0.08
+
+INVERT_STEERING = False  
 
 
 def get_quaternion_from_euler(roll, pitch, yaw):
@@ -20,100 +47,283 @@ def get_quaternion_from_euler(roll, pitch, yaw):
     qw = math.cos(roll/2) * math.cos(pitch/2) * math.cos(yaw/2) + math.sin(roll/2) * math.sin(pitch/2) * math.sin(yaw/2)
     return [qx, qy, qz, qw]
 
+
 class FollowerNode(Node):
     def __init__(self):
         super().__init__('follower_node')
 
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
 
-        self.sub_dist = self.create_subscription(Float32, '/human_distance', self.dist_callback, 10)
+        self.sub_dist  = self.create_subscription(Float32, '/human_distance', self.dist_callback, 10)
         self.sub_angle = self.create_subscription(Float32, '/human_angle', self.angle_callback, 10)
+        self.sub_scan  = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        
+        self.sub_odom  = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+
+        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+
+        self.angle_history = deque(maxlen=10)
+        self.last_trend_sign = 1.0  
 
         self.latest_dist = None
         self.latest_angle_deg = None
+        self.last_human_update_time = self.get_clock().now()
         
-        self.current_goal_handle = None
-        
-        self.state = 'IDLE'
+        self.robot_x = 0.0
+        self.robot_y = 0.0
+        self.robot_yaw = 0.0
 
-        self.locked_dist = 0.0
-        self.locked_angle = 0.0
-        
-        self.timer = self.create_timer(1.5, self.decision_loop)
-        self.get_logger().info("Follower Node V4 (Z blokadą celu) gotowy!")
+        # Tu przechowujemy dokładnie buty człowieka, nie miejsce postoju!
+        self.last_known_odom_x = 0.0
+        self.last_known_odom_y = 0.0
+        self.last_known_odom_yaw = 0.0
+
+        self.obstacle_ahead = False
+        self.state = 'IDLE'
+        self.current_goal_handle = None
+
+        self.integral_ang   = 0.0
+        self.integral_lin   = 0.0
+        self.prev_error_ang = 0.0
+        self.prev_error_lin = 0.0
+        self.last_pid_time  = self.get_clock().now()
+
+        self.timer = self.create_timer(0.05, self.decision_loop)
+        self.get_logger().info("Follower Node V20 (Precyzyjny Odom + Żelazne Kręcenie) gotowy!")
+
+    def odom_callback(self, msg):
+        self.robot_x = msg.pose.pose.position.x
+        self.robot_y = msg.pose.pose.position.y
+        q = msg.pose.pose.orientation
+        siny_cosp = 2 * (q.w * q.z + q.x * q.y)
+        cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
+        self.robot_yaw = math.atan2(siny_cosp, cosy_cosp)
 
     def dist_callback(self, msg):
         self.latest_dist = msg.data
+        self.last_human_update_time = self.get_clock().now()
 
     def angle_callback(self, msg):
         self.latest_angle_deg = msg.data
+        self.last_human_update_time = self.get_clock().now()
+        
+        self.angle_history.append(msg.data)
+        self.update_movement_trend()
+
+    def update_movement_trend(self):
+        if len(self.angle_history) >= 3:
+            start_angle = self.angle_history[0]
+            end_angle = self.angle_history[-1]
+            trend = end_angle - start_angle
+            
+            if abs(trend) > 2.0:
+                self.last_trend_sign = 1.0 if trend > 0 else -1.0
+
+    def scan_callback(self, msg):
+        now = self.get_clock().now()
+        time_since = (now - self.last_human_update_time).nanoseconds / 1e9
+        
+        human_recently_seen = (time_since <= 5.0 and self.latest_dist is not None)
+        
+        hx_base, hy_base = 0.0, 0.0
+        if human_recently_seen:
+            # Maskujemy dokładne położenie człowieka
+            dx = self.last_known_odom_x - self.robot_x
+            dy = self.last_known_odom_y - self.robot_y
+            hx_base = dx * math.cos(-self.robot_yaw) - dy * math.sin(-self.robot_yaw)
+            hy_base = dx * math.sin(-self.robot_yaw) + dy * math.cos(-self.robot_yaw)
+
+        min_dist = float('inf')
+        cone_rad = math.radians(CONE_ANGLE_DEG)
+
+        for i, d in enumerate(msg.ranges):
+            if math.isinf(d) or math.isnan(d) or d < msg.range_min or d > msg.range_max:
+                continue
+            
+            angle = msg.angle_min + i * msg.angle_increment
+            angle = (angle + math.pi) % (2 * math.pi) - math.pi 
+            
+            if abs(angle) < cone_rad:
+                is_human = False
+                if human_recently_seen:
+                    px = d * math.cos(angle)
+                    py = d * math.sin(angle)
+                    if math.hypot(px - hx_base, py - hy_base) < 0.7:
+                        is_human = True
+                
+                if not is_human and d < min_dist:
+                    min_dist = d
+        
+        self.obstacle_ahead = min_dist < OBSTACLE_AVOID_DIST
+
+    def reset_pid(self):
+        self.integral_ang = 0.0
+        self.integral_lin = 0.0
+        self.prev_error_ang = 0.0
+        self.prev_error_lin = 0.0
 
     def decision_loop(self):
         if self.latest_dist is None or self.latest_angle_deg is None:
             return
 
-        dist = self.latest_dist
-        angle_rad = math.radians(self.latest_angle_deg)
+        now = self.get_clock().now()
+        time_since = (now - self.last_human_update_time).nanoseconds / 1e9
 
-        if dist > MAX_DIST:
-            if self.state != 'IDLE':
-                self.cancel_current_goal()
+        dt = (now - self.last_pid_time).nanoseconds / 1e9
+        self.last_pid_time = now
+        if dt <= 0.001:
             return
 
-        # 1. Za blisko - Cofanie
-        if dist < STOP_DIST:
-            if self.state != 'REVERSING':
-                self.cancel_current_goal() # Anulujemy pościg, jeśli trwał
-                self.get_logger().info("Za blisko! Wycofuję się!")
-                self.send_nav_goal(-0.5, 0.0, 0.0)
-                self.state = 'REVERSING'
+        # 0. Zabezpieczenie dla pracującego Nav2
+        if self.state == 'NAV2_AVOID':
             return
 
-        # 2. Strefa idealna - HAMOWANIE
-        if STOP_DIST <= dist <= TOTAL_STOP_DIST:
-            if self.state != 'IDLE':
-                self.get_logger().info(f"Dystans OK ({dist:.2f}m). HAMUJĘ!")
-                self.cancel_current_goal()
-                self.state = 'IDLE'
+        # =================================================================
+        # 1. ZGUBIONY I DOJECHAŁ NA MIEJSCE -> BLOKADA LASERA I TYLKO KRĘCENIE
+        # =================================================================
+        # Sprawdzamy dystans do zapisanej DOKŁADNEJ pozycji człowieka
+        dist_to_human_pos = math.hypot(self.last_known_odom_x - self.robot_x, self.last_known_odom_y - self.robot_y)
+        arrived_at_last_pos = (dist_to_human_pos <= 0.6) # Tolerancja 60 cm od stóp człowieka
+
+        if time_since > CMD_VEL_TIMEOUT and arrived_at_last_pos:
+            if self.state != 'SMART_SEARCH':
+                self.get_logger().info("Dotarłem w miejsce zgubienia. Szukam kręcąc się...")
+                self.state = 'SMART_SEARCH'
+                self.reset_pid()
+
+            # Płynny obrót i wcześniejszy RETURN blokuje wywoływanie Nav2!
+            spin_velocity = math.copysign(SEARCH_ANGULAR_VEL, self.last_trend_sign)
+            if INVERT_STEERING:
+                spin_velocity = -spin_velocity
+                
+            self.send_cmd_vel(0.0, spin_velocity)
             return
 
-        # 3. Pościg 
-        if self.state != 'CHASING':
-            # Na wypadek, gdyby robot wcześniej cofał, najpierw czyścimy cel
-            self.cancel_current_goal()
+        # =================================================================
+        # 2. PRZESZKODA AWARIJNA -> NAV2 (Gdy goni człowieka, ale jest daleko)
+        # =================================================================
+        if self.obstacle_ahead:
+            self.get_logger().warn("Przeszkoda! Nav2 omija do EXACT pozycji człowieka.")
+            self.send_zero_vel()
+            self.reset_pid()
             
-            drive_dist = dist - TOTAL_STOP_DIST
-            target_x = drive_dist * math.cos(angle_rad)
-            target_y = drive_dist * math.sin(angle_rad)
+            self.send_nav_goal(self.last_known_odom_x, self.last_known_odom_y, self.last_known_odom_yaw)
+            self.state = 'NAV2_AVOID'
+            return
 
-            self.get_logger().info(f"Ruszam do celu: {drive_dist:.2f}m przed robota.")
-            self.send_nav_goal(target_x, target_y, angle_rad)
-            self.state = 'CHASING'
+        # =================================================================
+        # 3. CZŁOWIEK W KADRZE -> PŁYNNY PID + AKTUALIZACJA ODOM
+        # =================================================================
+        if time_since <= CMD_VEL_TIMEOUT:
+            if self.state != 'DIRECT_FOLLOW':
+                self.get_logger().info("Widzę człowieka! Śledzę (PID).")
+                self.cancel_current_goal()
+                self.reset_pid()
+                self.state = 'DIRECT_FOLLOW'
             
-            self.locked_dist = dist
-            self.locked_angle = self.latest_angle_deg
+            dist = self.latest_dist
+            angle_deg = self.latest_angle_deg
+            angle_rad = math.radians(angle_deg)
+            
+            # POPRAWKA 1: Zapisujemy dokładnie pozycję człowieka na mapie odom, NIE robota!
+            hx_base = dist * math.cos(angle_rad)
+            hy_base = dist * math.sin(angle_rad)
+            
+            self.last_known_odom_x = self.robot_x + hx_base * math.cos(self.robot_yaw) - hy_base * math.sin(self.robot_yaw)
+            self.last_known_odom_y = self.robot_y + hx_base * math.sin(self.robot_yaw) + hy_base * math.cos(self.robot_yaw)
+            self.last_known_odom_yaw = self.robot_yaw + angle_rad
+
+            # PID do podążania uwzględnia bezpieczny dystans postoju (1.0 m)
+            error_ang = angle_deg
+            error_lin = dist - DESIRED_DISTANCE_M
+
+            self.integral_ang += error_ang * dt
+            deriv_ang = (error_ang - self.prev_error_ang) / dt
+            self.prev_error_ang = error_ang
+            angular_z = (KP_ANG * error_ang + KI_ANG * self.integral_ang + KD_ANG * deriv_ang)
+
+            self.integral_lin += error_lin * dt
+            deriv_lin = (error_lin - self.prev_error_lin) / dt
+            self.prev_error_lin = error_lin
+            linear_x = (KP_LIN * error_lin + KI_LIN * self.integral_lin + KD_LIN * deriv_lin)
+
+            if abs(error_ang) < ANGLE_DEADZONE_DEG:
+                angular_z = 0.0
+                self.integral_ang = 0.0
+
+            if abs(error_lin) < DIST_DEADZONE_M:
+                linear_x = 0.0
+                self.integral_lin = 0.0
+
+            if INVERT_STEERING:
+                angular_z = -angular_z
+
+            linear_x  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear_x))
+            angular_z = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular_z))
+
+            self.send_cmd_vel(linear_x, angular_z)
+
+        # =================================================================
+        # 4. CZŁOWIEK ZGUBIONY -> JEDZIEMY W CIEMNO NA PID
+        # =================================================================
         else:
-            dist_diff = abs(dist - self.locked_dist)
-            angle_diff = abs(self.latest_angle_deg - self.locked_angle)
+            if self.state != 'GOTO_LAST_POS':
+                self.get_logger().info("Zgubiłem cel. Jadę w dokładne miejsce zniknięcia!")
+                self.state = 'GOTO_LAST_POS'
+                self.reset_pid()
+            
+            # Kierujemy się na globalne koordynaty człowieka
+            angle_to_target_odom = math.atan2(self.last_known_odom_y - self.robot_y, self.last_known_odom_x - self.robot_x)
+            error_ang_rad = angle_to_target_odom - self.robot_yaw
+            error_ang_rad = (error_ang_rad + math.pi) % (2 * math.pi) - math.pi
+            
+            error_ang = math.degrees(error_ang_rad) 
+            error_lin = dist_to_human_pos - 0.2  # Lekki margines błędu przed stopami człowieka
 
-            # Zmieniłem tolerancję kąta, 50 stopni to było bardzo dużo!
-            if dist_diff > 0.5 or angle_diff > 15.0:
-                self.get_logger().info(f"Człowiek zmienił pozycję! Przeliczam...")
-                self.cancel_current_goal() 
-                self.state = 'IDLE' # Zresetowanie stanu wymusi wysłanie nowego celu w następnym obrocie
+            self.integral_ang += error_ang * dt
+            deriv_ang = (error_ang - self.prev_error_ang) / dt
+            self.prev_error_ang = error_ang
+            angular_z = (KP_ANG * error_ang + KI_ANG * self.integral_ang + KD_ANG * deriv_ang)
 
+            self.integral_lin += error_lin * dt
+            deriv_lin = (error_lin - self.prev_error_lin) / dt
+            self.prev_error_lin = error_lin
+            linear_x = (KP_LIN * error_lin + KI_LIN * self.integral_lin + KD_LIN * deriv_lin)
+
+            if abs(error_ang) < ANGLE_DEADZONE_DEG:
+                angular_z = 0.0
+            if abs(error_lin) < DIST_DEADZONE_M:
+                linear_x = 0.0
+
+            if INVERT_STEERING:
+                angular_z = -angular_z
+
+            linear_x  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear_x))
+            angular_z = max(-MAX_ANGULAR_VEL, min(MAX_ANGULAR_VEL, angular_z))
+
+            self.send_cmd_vel(linear_x, angular_z)
+
+    def send_cmd_vel(self, linear, angular):
+        msg = Twist()
+        msg.linear.x = float(linear)
+        msg.angular.z = float(angular)
+        self.cmd_pub.publish(msg)
+
+    def send_zero_vel(self):
+        self.send_cmd_vel(0.0, 0.0)
+
+    # --- Obsługa Nav2 ---
     def send_nav_goal(self, x, y, yaw):
-        if not self.nav_to_pose_client.wait_for_server(timeout_sec=1.0):
+        if not self.nav_to_pose_client.wait_for_server(timeout_sec=0.5):
             return
 
         goal_msg = NavigateToPose.Goal()
-        
         pose = PoseStamped()
         pose.header.frame_id = 'base_link'
         pose.header.stamp = self.get_clock().now().to_msg()
-        pose.pose.position.x = x
+        # Wyznaczamy cel lekko do przodu, omijając to co jest przed nami
+        pose.pose.position.x = x if x > 0.5 else 1.0
         pose.pose.position.y = y
-        pose.pose.position.z = 0.0
         
         q = get_quaternion_from_euler(0, 0, yaw)
         pose.pose.orientation.x = q[0]
@@ -122,9 +332,9 @@ class FollowerNode(Node):
         pose.pose.orientation.w = q[3]
 
         goal_msg.pose = pose
-        
         send_goal_future = self.nav_to_pose_client.send_goal_async(goal_msg)
         send_goal_future.add_done_callback(self.goal_response_callback)
+
 
     def goal_response_callback(self, future):
         goal_handle = future.result()
@@ -132,13 +342,12 @@ class FollowerNode(Node):
             self.state = 'IDLE'
             return
         self.current_goal_handle = goal_handle
-        
         get_result_future = goal_handle.get_result_async()
         get_result_future.add_done_callback(self.get_result_callback)
 
     def get_result_callback(self, future):
-        self.state = 'IDLE'
         self.current_goal_handle = None
+        self.state = 'IDLE'
 
     def cancel_current_goal(self):
         if self.current_goal_handle is not None:

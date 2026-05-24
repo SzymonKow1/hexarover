@@ -21,6 +21,11 @@ colcon build --symlink-install
 ```
 ### 4. Uruchomienie Symulacji 
 ```
+-------------------------------------------------------
+(Jezeli nie zainstalowane to trzeba pobrac dwie rzeczy:)
+pip3 install --user lapx --break-system-packages
+sudo apt install ros-jazzy-rviz-imu-plugin
+-------------------------------------------------------
 source install/setup.bash
 ros2 launch hexarover_bringup hexarover.launch.py
 ```

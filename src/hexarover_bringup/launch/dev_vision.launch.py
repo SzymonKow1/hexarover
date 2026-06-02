@@ -1,3 +1,5 @@
+# --- START OF FILE dev_vision.launch.py ---
+
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -18,24 +20,16 @@ def generate_launch_description():
         description='Czy otworzyć RViz2?'
     )
 
-    # 1. LIDAR
+    # 1. LIDAR (Poprawiono literówkę spacji w sllidar_a2m12_launch.py)
     lidar_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(sllidar_pkg, 'launch', 'sllidar_a2m12_launch .py')
+            os.path.join(sllidar_pkg, 'launch', 'sllidar_a2m12_launch.py')
         ),
         launch_arguments={'serial_port': '/dev/lidar'}.items()
     )
 
-    # 2. KAMERA
-    video_publisher_node = Node(
-        package='hexarover_vision',
-        executable='video_publisher',
-        name='video_publisher',
-        output='screen',
-    )
 
-    # 3. VISION NODE – YOLO + fuzja LiDAR
-    # publikuje: /human_angle, /human_distance, /human_marker, /camera_fov, ...
+    # 3. VISION NODE – Zunifikowany YOLO + fuzja LiDAR + Kamera
     vision_node = Node(
         package='hexarover_vision',
         executable='vision_node',
@@ -43,24 +37,7 @@ def generate_launch_description():
         output='screen',
     )
 
-    # 4. FOLLOWER NODE – PID, subskrybuje /human_angle i /human_distance
-    # publikuje /cmd_vel
-    follower_node = Node(
-        package='hexarover_vision',
-        executable='follower_node',
-        name='follower_node',
-        output='screen',
-    )
-
-    # 5. CYTRON DRIVER – subskrybuje /cmd_vel, steruje silnikami przez UART
-    cytron_node = Node(
-        package='cytron_driver',
-        executable='cytron_node',
-        name='cytron_node',
-        output='screen',
-    )
-
-    # 6. STATIC TF: laser → lidar_link
+    # 4. STATIC TF: laser → lidar_link
     tf_laser_to_lidar_link = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -69,7 +46,7 @@ def generate_launch_description():
         output='screen',
     )
 
-    # 7. RVIZ2
+    # 5. RVIZ2
     rviz_config = os.path.join(bringup_pkg, 'rviz', 'vision_dev.rviz')
     rviz_node = Node(
         package='rviz2',
@@ -84,10 +61,7 @@ def generate_launch_description():
     return LaunchDescription([
         arg_rviz,
         lidar_launch,
-        video_publisher_node,
         vision_node,
-        #follower_node,
-        #cytron_node,
         tf_laser_to_lidar_link,
         rviz_node,
     ])

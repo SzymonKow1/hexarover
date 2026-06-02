@@ -1,7 +1,22 @@
+# --- START OF FILE vision_node.py ---
+
+import os
+import sys
+import time
+
+# TWARDE OGRANICZENIE RDZENI DLA DETEKCJI (YOLO / NCNN):
+# Blokujemy proces tylko na rdzeniach 2 i 3.
+# Rdzenie 0 i 1 pozostają wolne dla komunikacji ROS 2 i systemu operacyjnego.
+try:
+    os.sched_setaffinity(0, {2, 3})
+except AttributeError:
+    pass
+
 import rclpy
 import math
 import cv2
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 
 from sensor_msgs.msg import LaserScan, Image
 from visualization_msgs.msg import Marker, MarkerArray
@@ -29,11 +44,27 @@ class VisionNode(Node):
         super().__init__('vision_node')
 
         self.bridge = CvBridge()
-        self.model  = YOLO("yolov8n.pt")
+        
+        # 1. Ładowanie modelu NCNN
+        self.model = YOLO("yolov8n_256_ncnn_model")
+        # 2. Bezpośrednie otwarcie kamery (unikanie opóźnień sieciowych ROS 2)
+        # Indeks 1 (zmień na 0, jeśli kamera nie ruszy)
+        self.camera_index = 0 
+        self.cap = cv2.VideoCapture(self.camera_index)
+        
+        # Optymalizacja rozdzielczości
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-        self.scan_sub  = self.create_subscription(LaserScan, '/scan',      self.scan_callback,  10)
-        self.image_sub = self.create_subscription(Image,     '/image_raw', self.image_callback, 10)
+        if not self.cap.isOpened():
+            self.get_logger().error(f"Nie można otworzyć kamery o indeksie {self.camera_index}!")
+            sys.exit()
 
+        # 3. Subskrypcja LiDAR-u
+        self.scan_sub  = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+
+        # 4. Publikatory (w tym opcjonalna publikacja obrazu do RViz z profilem qos_profile_sensor_data)
+        self.image_pub   = self.create_publisher(Image,       '/image_raw',       qos_profile_sensor_data)
         self.fov_pub     = self.create_publisher(Marker,      '/camera_fov',      10)
         self.cluster_pub = self.create_publisher(MarkerArray, '/lidar_clusters',   10)
         self.ray_pub     = self.create_publisher(Marker,      '/yolo_ray',         10)
@@ -49,47 +80,40 @@ class VisionNode(Node):
         self.smooth_angle = 0.0
         self.smooth_dist  = 0.0
 
+        # Zmienna do pomiaru FPS na żywo
+        self.last_frame_time = time.time()
+
+        # 5. Timery
         self.create_timer(1.0, self.publish_fov_marker)
-        self.get_logger().info("Węzeł gotowy!")
+        
+        # Pętla akwizycji i detekcji kamery: 0.067 s = 15 FPS
+        self.create_timer(0.067, self.camera_yolo_callback)
+
+        self.get_logger().info("Zunifikowany węzeł wizyjny NCNN gotowy i zoptymalizowany!")
 
     # ------------------------------------------------------------------ #
 
-    def scan_callback(self, msg):
-        points = []
-        for i, d in enumerate(msg.ranges):
-            if math.isinf(d) or math.isnan(d):
-                continue
-            if not (msg.range_min < d < msg.range_max):
-                continue
-            a = msg.angle_min + i * msg.angle_increment
-            points.append((d * math.cos(a), d * math.sin(a), d, a))
+    def camera_yolo_callback(self):
+        # Pomiar rzeczywistego czasu pętli do wyświetlenia FPS
+        current_time = time.time()
+        dt = current_time - self.last_frame_time
+        self.last_frame_time = current_time
+        fps = 1.0 / dt if dt > 0 else 0.0
 
-        if not points:
+        # Odczyt bezpośrednio z kamery (brak opóźnień ROS 2)
+        ret, frame = self.cap.read()
+        if not ret:
+            self.get_logger().warning('Błąd odczytu klatki z kamery.', throttle_duration_sec=2.0)
             return
 
-        clusters = []
-        current  = [points[0]]
-        for prev, curr in zip(points, points[1:]):
-            if math.hypot(curr[0] - prev[0], curr[1] - prev[1]) > CLUSTER_DIST_M:
-                clusters.append(current)
-                current = [curr]
-            else:
-                current.append(curr)
-        clusters.append(current)
-
-        self.publish_clusters(clusters)
-
-        if self.yolo_angle_rad is not None:
-            self.find_and_mark_target(clusters)
-
-    def image_callback(self, msg):
-        frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-        frame = cv2.resize(frame, (800, 600))
+        #frame = cv2.resize(frame, (800, 600))
         image_width = frame.shape[1]
 
+        # Detekcja YOLOv8 NCNN na świeżej lokalnej klatce
         results = self.model.track(
             frame, classes=[0], max_det=1,
-            verbose=False, conf=0.5, persist=True
+            verbose=False, conf=0.5, persist=True,
+            imgsz=256, iou=0.3
         )
         display = results[0].plot()
 
@@ -123,8 +147,52 @@ class VisionNode(Node):
             self.yolo_angle_cam_deg = None
             self.clear_yolo_markers()
 
+        # Dodanie FPS do okna graficznego (kolor czerwony)
+        cv2.putText(display, f"FPS: {fps:.1f}", (20, 50), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+
+        # Wyświetlenie okna bezpośrednio na pulpicie RPi 5
         cv2.imshow("Hexarover AI Vision", display)
         cv2.waitKey(1)
+
+        # Publikowanie opisanego obrazu do ROS 2, aby RViz2 nadal mógł go wyświetlać
+        # try:
+        #     msg = self.bridge.cv2_to_imgmsg(display, "bgr8")
+        #     msg.header.frame_id = "laser"
+        #     msg.header.stamp = self.get_clock().now().to_msg()
+        #     self.image_pub.publish(msg)
+        # except Exception as e:
+        #     self.get_logger().error(f"Błąd publikacji obrazu do ROS 2: {str(e)}")
+
+    # ------------------------------------------------------------------ #
+
+    def scan_callback(self, msg):
+        points = []
+        for i, d in enumerate(msg.ranges):
+            if math.isinf(d) or math.isnan(d):
+                continue
+            if not (msg.range_min < d < msg.range_max):
+                continue
+            a = msg.angle_min + i * msg.angle_increment
+            points.append((d * math.cos(a), d * math.sin(a), d, a))
+
+        if not points:
+            return
+
+        clusters = []
+        current  = [points[0]]
+        for prev, curr in zip(points, points[1:]):
+            if math.hypot(curr[0] - prev[0], curr[1] - prev[1]) > CLUSTER_DIST_M:
+                clusters.append(current)
+                current = [curr]
+            else:
+                current.append(curr)
+        clusters.append(current)
+
+        self.publish_clusters(clusters)
+
+        if self.yolo_angle_rad is not None:
+            self.find_and_mark_target(clusters)
 
     # ------------------------------------------------------------------ #
 
@@ -331,10 +399,19 @@ class VisionNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = VisionNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-    cv2.destroyAllWindows()
+    
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.get_logger().info('Zamykanie węzła wizyjnego i zwalnianie kamery...')
+        # Bardzo ważne: zwalniamy zasób kamery przy wyjściu z programu
+        if hasattr(node, 'cap') and node.cap.isOpened():
+            node.cap.release()
+        node.destroy_node()
+        rclpy.try_shutdown()
+        cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':

@@ -49,7 +49,7 @@ class VisionNode(Node):
         self.model = YOLO("yolov8n_256_ncnn_model")
         # 2. Bezpośrednie otwarcie kamery (unikanie opóźnień sieciowych ROS 2)
         # Indeks 1 (zmień na 0, jeśli kamera nie ruszy)
-        self.camera_index = 0 
+        self.camera_index = 0
         self.cap = cv2.VideoCapture(self.camera_index)
         
         # Optymalizacja rozdzielczości

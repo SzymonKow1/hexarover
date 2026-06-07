@@ -17,6 +17,6 @@ echo "2/3 Dodanie do sciezki"
 source install/setup.bash
 
 echo "3/3 Odpalenie projektu"
-ros2 launch hexarover_bringup dev_vision.launch.py
+ros2 launch hexarover_bringup dev_nav2.launch.py
 
 echo "Trzymaj sie moze i nie dziala narazie ale dasz rade"

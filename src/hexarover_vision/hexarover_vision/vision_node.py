@@ -139,21 +139,21 @@ class VisionNode(Node):
             self.publish_yolo_ray(angle_laser_rad)
             self.publish_search_window(angle_laser_rad)
 
-            cv2.putText(display, f"Angle: {angle_deg:.1f} deg",
-                        (int(x_center) - 50, int(y_center) - 50),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            #cv2.putText(display, f"Angle: {angle_deg:.1f} deg",
+                        #(int(x_center) - 50, int(y_center) - 50),
+                        #cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
         else:
             self.yolo_angle_rad     = None
             self.yolo_angle_cam_deg = None
             self.clear_yolo_markers()
 
         # Dodanie FPS do okna graficznego (kolor czerwony)
-        cv2.putText(display, f"FPS: {fps:.1f}", (20, 50), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+        #cv2.putText(display, f"FPS: {fps:.1f}", (20, 50), 
+                    #cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
 
         # Wyświetlenie okna bezpośrednio na pulpicie RPi 5
-        cv2.imshow("Hexarover AI Vision", display)
-        cv2.waitKey(1)
+        #cv2.imshow("Hexarover AI Vision", display)
+        #cv2.waitKey(1)
 
         # Publikowanie opisanego obrazu do ROS 2, aby RViz2 nadal mógł go wyświetlać
         # try:

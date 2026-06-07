@@ -92,17 +92,25 @@ class FollowerNode(Node):
             f"Follower gotowy | cel: {DESIRED_DISTANCE_M}m | "
             f"Kp_ang={KP_ANG} Kp_lin={KP_LIN}")
 
+        self.yolo_ready = False
+
     def angle_callback(self, msg):
         self.last_angle_deg = msg.data
         self.last_data_time = self.get_clock().now()
         if abs(msg.data) > ANGLE_DEADZONE_DEG:
             self.last_angle_sign = 1.0 if msg.data > 0 else -1.0
+        self.yolo_ready = True
+
 
     def distance_callback(self, msg):
         self.last_distance  = msg.data
         self.last_data_time = self.get_clock().now()
 
     def control_loop(self):
+        if not self.yolo_ready:
+            self.publish_stop()
+        return
+
         now     = self.get_clock().now()
         elapsed = (now - self.last_data_time).nanoseconds / 1e9
 

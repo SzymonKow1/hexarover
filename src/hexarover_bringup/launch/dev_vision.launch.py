@@ -81,11 +81,11 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        arg_rviz,
+        #arg_rviz,
         lidar_node,      # Bezpośredni, bezpieczny węzeł LiDAR
         vision_node,
         follower_node,  
         cytron_node,    
         tf_laser_to_lidar_link,
-        rviz_node,
+        #rviz_node,
     ])

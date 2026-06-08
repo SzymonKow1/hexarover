@@ -149,6 +149,14 @@ def generate_launch_description():
         parameters=[{'use_sim_time': False}]
     )
 
+    tf_base_to_laser = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='tf_base_to_laser',
+        arguments=['0', '0', '0.1', '0', '0', '0', 'base_link', 'laser'],
+        output='screen',
+    )
+
     return LaunchDescription([
         rviz_arg,
         robot_state_publisher,
@@ -162,4 +170,5 @@ def generate_launch_description():
         follower_node,
         cytron_node,
         rviz_node,
+        tf_base_to_laser,
     ])

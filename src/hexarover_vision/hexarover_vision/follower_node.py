@@ -35,23 +35,32 @@ MAX_ANGULAR_VEL = 0.4      # maks prędkość kątowa
 # Kp: większa → ostrzejszy skręt; za duża → oscylacje
 # Ki: kompensuje stały offset; zacznij od 0.0
 # Kd: tłumi oscylacje; zacznij od małej wartości
-KP_ANG = 0.005   # zacznij tu, zwiększaj o 0.002 jeśli reaguje za wolno
+KP_ANG = 0.004
 KI_ANG = 0.0
-KD_ANG = 0.03
+KD_ANG = 0.02
 
 # ── PID liniowy (utrzymanie odległości) ──────────────────────────────
 # error = distance - DESIRED_DISTANCE_M
 # Kp: większa → ostrzejsze przyspieszenie; za duża → przejeżdża
 # Ki: zacznij od 0.0
 # Kd: tłumi przejeżdżanie
-KP_LIN = 0.4     # zacznij tu
+KP_LIN = 0.6
 KI_LIN = 0.0
-KD_LIN = 0.05
+KD_LIN = 0.06
 
 # ── Strefa martwa ────────────────────────────────────────────────────
 # poniżej tego kąta/dystansu – nie kręć/nie jedź (eliminuje drgania)
-ANGLE_DEADZONE_DEG  = 5.0   # stopnie
+ANGLE_DEADZONE_DEG  = 8.0   # stopnie
 DIST_DEADZONE_M     = 0.08  # metry
+
+# ── Próg minimalnej prędkości ────────────────────────────────────────
+# silniki Dagu nie ruszają poniżej ~0.15 – poniżej tego dajemy 0
+MIN_LINEAR_VEL  = 0.15
+MIN_ANGULAR_VEL = 0.10
+
+# ── Filtr złych odczytów lidaru ──────────────────────────────────────
+# odczyty poniżej tej wartości są śmieciem z lidaru (za blisko/błąd)
+MIN_VALID_DISTANCE_M = 0.15
 
 # ── Timeout bezpieczeństwa ───────────────────────────────────────────
 # jeśli przez ten czas nie ma danych → STOP
@@ -71,13 +80,13 @@ class FollowerNode(Node):
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
         # ostatnie pomiary
-        self.last_angle_deg = 0.0
-        self.last_distance  = DESIRED_DISTANCE_M
+        self.last_angle_deg  = 0.0
+        self.last_distance   = DESIRED_DISTANCE_M
         self.last_angle_sign = 1.0  # kierunek ostatniego zniknięcia: +1 lewo, -1 prawo
 
         # całki i poprzednie błędy dla PID
-        self.integral_ang  = 0.0
-        self.integral_lin  = 0.0
+        self.integral_ang   = 0.0
+        self.integral_lin   = 0.0
         self.prev_error_ang = 0.0
         self.prev_error_lin = 0.0
 
@@ -101,16 +110,13 @@ class FollowerNode(Node):
             self.last_angle_sign = 1.0 if msg.data > 0 else -1.0
         self.yolo_ready = True
 
-
     def distance_callback(self, msg):
+        if msg.data < MIN_VALID_DISTANCE_M:   # filtr śmieci z lidaru
+            return
         self.last_distance  = msg.data
         self.last_data_time = self.get_clock().now()
 
     def control_loop(self):
-        if not self.yolo_ready:
-            self.publish_stop()
-        return
-
         now     = self.get_clock().now()
         elapsed = (now - self.last_data_time).nanoseconds / 1e9
 
@@ -131,7 +137,7 @@ class FollowerNode(Node):
             return
 
         # ── BŁĘDY ────────────────────────────────────────────────────
-        error_ang = self.last_angle_deg                      # [stopnie]
+        error_ang = self.last_angle_deg                       # [stopnie]
         error_lin = self.last_distance - DESIRED_DISTANCE_M  # [metry]
 
         # strefa martwa
@@ -149,6 +155,10 @@ class FollowerNode(Node):
                      KI_ANG * self.integral_ang +
                      KD_ANG * deriv_ang)
 
+        # próg minimalnej prędkości kątowej – eliminuje szarpanie
+        if 0.0 < abs(angular_z) < MIN_ANGULAR_VEL:
+            angular_z = 0.0
+
         # ── PID liniowy ──────────────────────────────────────────────
         self.integral_lin  += error_lin * dt
         deriv_lin           = (error_lin - self.prev_error_lin) / dt
@@ -158,9 +168,13 @@ class FollowerNode(Node):
                     KI_LIN * self.integral_lin +
                     KD_LIN * deriv_lin)
 
-        # gdy człowiek za blisko – cofaj, ale nie kręć mocno
+        # gdy człowiek za blisko – cofaj
         if error_lin < -DIST_DEADZONE_M:
             linear_x = -MAX_LINEAR_VEL * 0.75
+
+        # próg minimalnej prędkości liniowej – eliminuje szarpanie
+        if 0.0 < abs(linear_x) < MIN_LINEAR_VEL:
+            linear_x = 0.0
 
         # ── CLAMP ────────────────────────────────────────────────────
         linear_x  = max(-MAX_LINEAR_VEL,  min(MAX_LINEAR_VEL,  linear_x))

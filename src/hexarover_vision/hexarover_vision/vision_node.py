@@ -156,13 +156,13 @@ class VisionNode(Node):
         #cv2.waitKey(1)
 
         # Publikowanie opisanego obrazu do ROS 2, aby RViz2 nadal mógł go wyświetlać
-        # try:
-        #     msg = self.bridge.cv2_to_imgmsg(display, "bgr8")
-        #     msg.header.frame_id = "laser"
-        #     msg.header.stamp = self.get_clock().now().to_msg()
-        #     self.image_pub.publish(msg)
-        # except Exception as e:
-        #     self.get_logger().error(f"Błąd publikacji obrazu do ROS 2: {str(e)}")
+        try:
+            msg = self.bridge.cv2_to_imgmsg(display, "bgr8")
+            msg.header.frame_id = "laser"
+            msg.header.stamp = self.get_clock().now().to_msg()
+            self.image_pub.publish(msg)
+        except Exception as e:
+            self.get_logger().error(f"Błąd publikacji obrazu do ROS 2: {str(e)}")
 
     # ------------------------------------------------------------------ #
 

@@ -18,6 +18,7 @@ controller_server:
     controller_plugins: ["FollowPath"]
     progress_checker_plugins: ["progress_checker"]
     goal_checker_plugins: ["general_goal_checker"]
+    cmd_vel_topic: "cmd_vel_nav"
 
 
     progress_checker:

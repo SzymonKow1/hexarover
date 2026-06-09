@@ -4,7 +4,7 @@ slam_toolbox:
     odom_frame: odom
     map_frame: map
     base_frame: base_link
-    scan_topic: scan
+    scan_topic: /scan
     use_sim_time: false
     use_imu_data: false # Włączamy wsparcie dla IMU
     imu_topic: /imu    # Nazwa tematu z Twojego mostka
